@@ -14,11 +14,13 @@ from __future__ import annotations
 
 import pandas as pd
 
-from ..config import AGGREGATE_PARTNERS, FOCUS
+from ..config import FOCUS, is_country_partner
 
 
 def _bilateral(df: pd.DataFrame, reporter: str, flow: str) -> pd.DataFrame:
-    return df[(df["reporter"] == reporter) & (df["flow"] == flow) & (~df["partner"].isin(AGGREGATE_PARTNERS))]
+    """Real-country partners only, HS2 chapters only (no TOTAL line, no aggregates)."""
+    keep = (df["reporter"] == reporter) & (df["flow"] == flow) & (df["product"].str.len() == 2) & is_country_partner(df["partner"])
+    return df[keep]
 
 
 def hhi_by_product(df: pd.DataFrame, period: str, flow: str, reporter: str = FOCUS, min_value: float = 0.0) -> pd.DataFrame:

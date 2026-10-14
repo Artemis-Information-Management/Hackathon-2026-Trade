@@ -68,8 +68,10 @@ one = result[result["series_id"] == sid]
 st.plotly_chart(decomposition_chart(one, title=_label(sid)), width="stretch")
 
 # Seasonal profile: average seasonal component by calendar month, across series
-st.markdown("#### Seasonal fingerprint (average seasonal component by month, % of trend)")
-prof = result.copy()
+N_FINGERPRINT = 15
+st.markdown(f"#### Seasonal fingerprint of the {N_FINGERPRINT} largest series (average seasonal component by month, % of trend)")
+largest = result.groupby("series_id")["value"].mean().nlargest(N_FINGERPRINT).index
+prof = result[result["series_id"].isin(largest)].copy()
 prof["month"] = prof["period"].str[5:7]
 prof["seasonal_pct"] = prof["seasonal"] / prof["trend"]
 fp = prof.pivot_table(index="series_id", columns="month", values="seasonal_pct", aggfunc="mean")

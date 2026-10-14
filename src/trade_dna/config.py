@@ -52,6 +52,22 @@ AGGREGATE_PARTNERS = {
     "QW",
 }
 
+# Two-letter codes that are NOT countries: Eurostat's special groupings
+# (stores & provisions, unknown destination, confidential...). Note that
+# "QA" is Qatar, a real country, so we list the special codes explicitly.
+SPECIAL_PARTNERS = {"QP", "QQ", "QR", "QS", "QU", "QV", "QW", "QX", "QY", "QZ"}
+
+
+def is_country_partner(codes):
+    """Vectorised test on a pandas Series of partner codes: True for real countries.
+
+    A partner counts as a country if its code has 2 letters (ISO2) and is not
+    one of the special groupings. Aggregates (WORLD, EU27_2020, AFRICA...)
+    have longer codes, so they are excluded without having to list them all.
+    """
+    return codes.str.len().eq(2) & ~codes.isin(SPECIAL_PARTNERS | AGGREGATE_PARTNERS)
+
+
 # --------------------------------------------------------------------------- #
 # Countries
 # --------------------------------------------------------------------------- #
@@ -87,25 +103,37 @@ COUNTRY_NAMES = {
     "JP": "Japan", "TR": "Türkiye",
 }
 
-# Short labels for HS2 chapters most relevant to Luxembourg.
-# Extend as needed; unknown codes fall back to the code itself.
+# Short plain-English labels for the HS2 chapters (HS 2022 nomenclature).
+# Unknown codes fall back to the code itself.
 HS2_LABELS = {
-    "27": "Mineral fuels",
-    "30": "Pharmaceuticals",
-    "39": "Plastics",
-    "40": "Rubber",
-    "72": "Iron & steel",
-    "73": "Articles of iron/steel",
-    "76": "Aluminium",
-    "84": "Machinery",
-    "85": "Electrical equipment",
-    "87": "Vehicles",
-    "88": "Aircraft",
-    "90": "Optical / medical instruments",
-    "94": "Furniture",
-    "22": "Beverages",
-    "48": "Paper",
-    "70": "Glass",
+    "01": "Live animals", "02": "Meat", "03": "Fish & seafood", "04": "Dairy, eggs, honey",
+    "05": "Other animal products", "06": "Live plants & flowers", "07": "Vegetables",
+    "08": "Fruit & nuts", "09": "Coffee, tea, spices", "10": "Cereals", "11": "Milling products",
+    "12": "Oil seeds", "13": "Gums & resins", "14": "Other vegetable products",
+    "15": "Fats & oils", "16": "Meat & fish preparations", "17": "Sugars", "18": "Cocoa & chocolate",
+    "19": "Cereal & bakery preparations", "20": "Fruit & vegetable preparations",
+    "21": "Misc. food preparations", "22": "Beverages", "23": "Animal feed & food residues",
+    "24": "Tobacco", "25": "Salt, stone, cement", "26": "Ores & slag", "27": "Mineral fuels",
+    "28": "Inorganic chemicals", "29": "Organic chemicals", "30": "Pharmaceuticals",
+    "31": "Fertilisers", "32": "Dyes, paints, inks", "33": "Cosmetics & perfumes",
+    "34": "Soap & waxes", "35": "Glues & proteins", "36": "Explosives & matches",
+    "37": "Photographic goods", "38": "Misc. chemical products", "39": "Plastics", "40": "Rubber",
+    "41": "Raw hides & leather", "42": "Leather articles", "43": "Furskins", "44": "Wood",
+    "45": "Cork", "46": "Basketware", "47": "Wood pulp", "48": "Paper", "49": "Printed matter",
+    "50": "Silk", "51": "Wool", "52": "Cotton", "53": "Other vegetable fibres",
+    "54": "Man-made filaments", "55": "Man-made staple fibres", "56": "Wadding & felt",
+    "57": "Carpets", "58": "Special woven fabrics", "59": "Coated textiles", "60": "Knitted fabrics",
+    "61": "Knitted clothing", "62": "Woven clothing", "63": "Other textile articles",
+    "64": "Footwear", "65": "Headgear", "66": "Umbrellas", "67": "Feathers & artificial flowers",
+    "68": "Stone & plaster articles", "69": "Ceramics", "70": "Glass",
+    "71": "Pearls, gems, precious metals", "72": "Iron & steel", "73": "Articles of iron/steel",
+    "74": "Copper", "75": "Nickel", "76": "Aluminium", "78": "Lead", "79": "Zinc", "80": "Tin",
+    "81": "Other base metals", "82": "Tools & cutlery", "83": "Misc. metal articles",
+    "84": "Machinery", "85": "Electrical equipment", "86": "Railway equipment", "87": "Vehicles",
+    "88": "Aircraft", "89": "Ships", "90": "Optical / medical instruments", "91": "Clocks & watches",
+    "92": "Musical instruments", "93": "Arms & ammunition", "94": "Furniture", "95": "Toys & games",
+    "96": "Misc. manufactured articles", "97": "Works of art", "98": "Special classifications",
+    "99": "Special classifications",
 }
 
 
@@ -115,3 +143,8 @@ def country_name(code: str) -> str:
 
 def hs2_label(code: str) -> str:
     return f"{code} - {HS2_LABELS[code]}" if code in HS2_LABELS else code
+
+
+def hs2_name(code: str) -> str:
+    """Plain name of a chapter: "Machinery". Falls back to the code itself."""
+    return HS2_LABELS.get(code, code)

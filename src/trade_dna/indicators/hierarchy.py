@@ -31,12 +31,16 @@ def prune_hierarchy(
 ) -> pd.DataFrame:
     """Return a node table (id, parent, label, value, level, is_other) for a sunburst.
 
-    ``df`` must contain at least ``product`` (codes of a single finest length,
-    e.g. all CN8) and ``value``. Codes are truncated to build the upper levels.
+    ``df`` must contain at least ``product`` and ``value``. Only the finest
+    level present (e.g. the 8-digit CN8 codes) is used as the base: Eurostat
+    stores every level (HS2, HS4, HS6, CN8) in the same table, so keeping
+    them all would count each flow several times. The upper levels are
+    rebuilt by truncating the finest codes.
     """
     df = df[["product", "value"]].copy()
     df["product"] = df["product"].astype(str)
     finest = int(df["product"].str.len().max())
+    df = df[df["product"].str.len() == finest]
     levels = [lv for lv in LEVELS if lv <= min(finest, max_level)]
     totals = {lv: _level_totals(df, lv) for lv in levels}
 

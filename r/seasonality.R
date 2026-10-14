@@ -30,6 +30,10 @@ df$series_id <- paste(df$reporter, df$partner, df$product, df$flow, sep = "|")
 decompose_one <- function(s) {
   s <- s[order(s$period), ]
   if (nrow(s) < 24 || any(is.na(s$value))) return(NULL)
+  # Eurostat omits months with no trade. STL needs a regular monthly series, and a
+  # missing month would silently shift every later month, so skip series with gaps.
+  month_index <- as.integer(substr(s$period, 1, 4)) * 12 + as.integer(substr(s$period, 6, 7))
+  if (any(diff(month_index) != 1)) return(NULL)
   start_year  <- as.integer(substr(s$period[1], 1, 4))
   start_month <- as.integer(substr(s$period[1], 6, 7))
   x <- ts(s$value, start = c(start_year, start_month), frequency = 12)
@@ -46,8 +50,10 @@ decompose_one <- function(s) {
 }
 
 parts <- lapply(split(df, df$series_id), decompose_one)
+n_total <- length(parts)
 res <- do.call(rbind, parts[!sapply(parts, is.null)])
-if (is.null(res)) stop("No series with at least 24 monthly observations")
+if (is.null(res)) stop("No complete series with at least 24 consecutive monthly observations")
+cat(sprintf("%d of %d series kept (the others are too short or have missing months)\n", length(unique(res$series_id)), n_total))
 
 dir.create(dirname(output), showWarnings = FALSE, recursive = TRUE)
 write.csv(res, output, row.names = FALSE)

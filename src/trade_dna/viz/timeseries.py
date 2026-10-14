@@ -17,11 +17,29 @@ EVENTS = {
 }
 
 
+def _is_year(p: str) -> bool:
+    return len(p) == 4 and p.isdigit()
+
+
+def _x(periods: pd.Series) -> pd.Series:
+    """Annual periods ('1999') become integers: Plotly then draws a real year axis.
+
+    With strings, Plotly cannot decide between a date and a category axis, and the
+    event lines (also given as years) end up far away from the data.
+    """
+    p = pd.Series(periods).astype(str)
+    return p.astype(int) if p.map(_is_year).all() else p
+
+
 def _add_events(fig: go.Figure, periods: list[str]) -> None:
     for year, label in EVENTS.items():
         if year in periods:
-            fig.add_vline(x=year, line_width=1, line_dash="dot", line_color=PALETTE["muted"])
-            fig.add_annotation(x=year, y=1.0, yref="paper", text=label, showarrow=False, font=dict(size=10, color=PALETTE["muted"]), yanchor="bottom")
+            x = int(year) if _is_year(year) else year
+            fig.add_vline(x=x, line_width=1, line_dash="dot", line_color=PALETTE["muted"])
+            fig.add_annotation(
+                x=x, y=1.0, yref="paper", text=label, showarrow=False, xanchor="left", yanchor="top",
+                xshift=3, font=dict(size=10, color=PALETTE["muted"]),
+            )
 
 
 def similarity_lines(sim_long: pd.DataFrame, reporters: list[str], focus: str = FOCUS) -> go.Figure:
@@ -32,7 +50,7 @@ def similarity_lines(sim_long: pd.DataFrame, reporters: list[str], focus: str = 
             continue
         s = sim_long[sim_long["reporter"] == rep].sort_values("period")
         fig.add_scatter(
-            x=s["period"], y=s["fk"], mode="lines+markers", name=country_name(rep),
+            x=_x(s["period"]), y=s["fk"], mode="lines+markers", name=country_name(rep),
             line=dict(width=2, color=PALETTE["categorical"][i % len(PALETTE["categorical"])]),
             marker=dict(size=5),
             hovertemplate="%{x}: %{y:.2f}<extra>" + country_name(rep) + "</extra>",
@@ -48,7 +66,7 @@ def hhi_lines(hhi_long: pd.DataFrame, products: list[str]) -> go.Figure:
     for i, p in enumerate(products):
         s = hhi_long[hhi_long["product"] == p].sort_values("period")
         fig.add_scatter(
-            x=s["period"], y=s["hhi"], mode="lines+markers", name=hs2_label(p),
+            x=_x(s["period"]), y=s["hhi"], mode="lines+markers", name=hs2_label(p),
             line=dict(width=2, color=PALETTE["categorical"][i % len(PALETTE["categorical"])]),
             marker=dict(size=5),
             customdata=s[["top_partner", "top_share"]],

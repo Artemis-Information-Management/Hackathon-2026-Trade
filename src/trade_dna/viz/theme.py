@@ -16,10 +16,12 @@ PALETTE = {
 
 
 def apply_theme(fig: go.Figure, height: int = 420) -> go.Figure:
+    # The legend sits just above the plot: leave room for a title above it
+    top = 72 if fig.layout.title.text else 40
     fig.update_layout(
         template="plotly_white",
         height=height,
-        margin=dict(l=10, r=10, t=40, b=10),
+        margin=dict(l=10, r=10, t=top, b=10),
         font=dict(family="Inter, Segoe UI, sans-serif", color=PALETTE["ink"], size=13),
         colorway=PALETTE["categorical"],
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
