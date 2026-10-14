@@ -142,3 +142,24 @@ def common_matrix(shares: pd.DataFrame, countries: list[str], focus: str = FOCUS
         return head
     folded = pd.DataFrame([tail.sum()], index=[other_label(len(tail))])
     return pd.concat([head, folded])
+
+
+def product_twins(shares: pd.DataFrame, product: str, focus: str = FOCUS) -> pd.DataFrame:
+    """Who looks most like ``focus`` on ONE chapter? One row per other reporter.
+
+    share        weight of the chapter in that country's trade (0-1)
+    focus_share  the same weight for the focus country (constant column)
+    gap          |share - focus_share|: how far apart the two countries are on this chapter
+    common       min(share, focus_share): what this chapter adds to their similarity score
+
+    Sorted by ``gap`` (closest first). The gap is this chapter's own term in the distance
+    behind the score: summed over all chapters it equals 2 x (1 - Finger-Kreinin).
+    """
+    ref = float(shares.loc[focus, product])
+    s = shares[product].drop(focus, errors="ignore")
+    out = pd.DataFrame({"share": s})
+    out["focus_share"] = ref
+    out["gap"] = (out["share"] - ref).abs()
+    out["common"] = out["share"].clip(upper=ref)
+    out.index.name = "reporter"
+    return out.reset_index().sort_values(["gap", "reporter"]).set_index("reporter")

@@ -15,11 +15,12 @@ from trade_dna.indicators.similarity import (  # noqa: E402
     overlap_summary,
     product_overlap,
     product_shares,
+    product_twins,
     similarity_over_time,
     top_twins,
 )
 from trade_dna.ui import cached_trade, country_multiselect, flow_selector, period_slider, sample_banner  # noqa: E402
-from trade_dna.viz import overlap_chart, similarity_lines, similarity_map, twin_product_heatmap  # noqa: E402
+from trade_dna.viz import overlap_chart, product_twin_chart, similarity_lines, similarity_map, twin_product_heatmap  # noqa: E402
 
 st.set_page_config(page_title="Trade twins · Trade DNA", page_icon="🧬", layout="wide")
 st.title("1 · Trade twins")
@@ -90,7 +91,7 @@ ranking = finger_kreinin(shares).drop(FOCUS, errors="ignore") if FOCUS in shares
 if ranking is None or ranking.empty:
     st.info(f"No product breakdown available for {period}.")
 else:
-    tab_one, tab_five = st.tabs(["One country in detail", "Top 5 side by side"])
+    tab_one, tab_five, tab_prod = st.tabs(["One country in detail", "Top 5 side by side", "Pick a product"])
 
     with tab_one:
         other = st.selectbox(
@@ -140,6 +141,44 @@ else:
             "A dark cell is a chapter that really ties the two economies together."
         )
 
+    with tab_prod:
+        lu_share = shares.loc[FOCUS]
+        chapters = [c for c in lu_share.sort_values(ascending=False).index if lu_share[c] > 0]
+        code = st.selectbox(
+            "Product (HS2 chapter), biggest for Luxembourg first. Type to search.",
+            options=chapters,
+            format_func=lambda c: f"{hs2_name(c)} ({c}) · {lu_share[c] * 100:.1f} % of {country_name(FOCUS)}'s {flow_word}",
+            key="twin_product",
+        )
+        n_other = len(shares.index) - 1
+        n_show = st.slider("Countries shown", 5, n_other, min(12, n_other), key="twin_product_n") if n_other > 5 else n_other
+
+        tw = product_twins(shares, code)
+        st.plotly_chart(
+            product_twin_chart(tw, code, flow_label=flow_word, n=n_show),
+            width="stretch",
+            config={"displayModeBar": False},
+        )
+
+        best = tw.iloc[0]
+        nxt = ", ".join(f"**{country_name(c)}**" for c in tw.index[1:3])
+        st.markdown(
+            f"On **{hs2_name(code)}** ({code}), the closest twin is **{country_name(tw.index[0])}**: "
+            f"this chapter makes up {best['share'] * 100:.1f} % of its {flow_word}, against "
+            f"{best['focus_share'] * 100:.1f} % for {country_name(FOCUS)} (a gap of {best['gap'] * 100:.1f} points)."
+            + (f" Next: {nxt}." if nxt else "")
+        )
+        if lu_share[code] < 0.01:
+            st.caption(
+                f"Careful: this is a small chapter for {country_name(FOCUS)} ({lu_share[code] * 100:.1f} %). "
+                "Most countries are within a point or two of it, so the ranking separates them very little."
+            )
+        st.caption(
+            f"Each bar is the weight of this chapter in a country's {flow_word}; the dashed amber line is {country_name(FOCUS)}'s. "
+            "The three closest countries are in blue, and the right-hand column says how far each one is, in percentage points. "
+            "The closer a bar is to the line, the more the country depends on this product like Luxembourg does."
+        )
+
 with st.expander("Method"):
     st.markdown(
         r"""
@@ -148,6 +187,8 @@ For each country $c$ and year $t$, let $s_{c,i,t}$ be the share of HS2 chapter $
 $$FK(LU, c, t) = \sum_i \min\big(s_{LU,i,t},\; s_{c,i,t}\big)$$
 
 **Product view.** The sum can be split by chapter: chapter $i$ contributes $\min(s_{LU,i}, s_{c,i})$, so the contributions add up exactly to $FK(LU, c)$. The butterfly chart shows these terms for one country; the heatmap shows them for the five closest twins. Chapters outside the ten largest are folded into one "Other chapters" row so the totals stay exact.
+
+**Product picker.** For one chapter $i$, the gap $|s_{LU,i} - s_{c,i}|$ says how far country $c$ is from Luxembourg on that product, and countries are ranked by it. It is the chapter's own term in the distance behind the score: $\sum_i |s_{LU,i} - s_{c,i}| = 2\,(1 - FK)$.
 
 Finger, J.M. & Kreinin, M.E. (1979), *A measure of export similarity and its possible uses*, Economic Journal 89.
 """

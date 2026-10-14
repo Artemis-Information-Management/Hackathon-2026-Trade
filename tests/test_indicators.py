@@ -18,6 +18,7 @@ from trade_dna.indicators import (  # noqa: E402
     overlap_summary,
     product_overlap,
     product_shares,
+    product_twins,
     prune_hierarchy,
     similarity_over_time,
 )
@@ -212,3 +213,21 @@ def test_line_charts_use_a_numeric_year_axis_so_event_lines_sit_on_the_data():
     xs = list(fig.data[0].x)
     assert xs[0] == 2005 and xs[-1] == 2024            # integers, not '2005'
     assert {s.x0 for s in fig.layout.shapes} == {2008, 2016, 2020, 2022}
+
+
+def test_product_twins_ranks_by_gap_and_ties_back_to_the_score():
+    shares = _shares_example()
+    tw = product_twins(shares, "72")
+    assert list(tw.index) == ["BB", "AA"]                      # BB is identical to LU, AA is far
+    assert tw.loc["BB", "gap"] == pytest.approx(0.0)
+    assert tw.loc["AA", "gap"] == pytest.approx(0.4)           # LU 50 % vs AA 10 %
+    assert tw.loc["AA", "common"] == pytest.approx(0.1)
+    assert "LU" not in tw.index
+    # chapter absent from the focus country: everyone's gap is their own share
+    tw27 = product_twins(shares, "27")
+    assert tw27.loc["AA", "gap"] == pytest.approx(0.3) and tw27.loc["AA", "common"] == pytest.approx(0.0)
+    # all the gaps of a country add up to 2 x (1 - FK)
+    fk = finger_kreinin(shares)
+    for other in ("AA", "BB"):
+        total_gap = sum(product_twins(shares, p).loc[other, "gap"] for p in shares.columns)
+        assert total_gap == pytest.approx(2 * (1 - fk[other]))
