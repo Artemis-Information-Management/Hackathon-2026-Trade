@@ -16,6 +16,9 @@ from trade_dna.indicators import (  # noqa: E402
     finger_kreinin,
     hhi_by_product,
     overlap_summary,
+    partner_product_mix,
+    partner_shares_over_time,
+    partner_table,
     product_overlap,
     product_shares,
     product_twins,
@@ -231,3 +234,57 @@ def test_product_twins_ranks_by_gap_and_ties_back_to_the_score():
     for other in ("AA", "BB"):
         total_gap = sum(product_twins(shares, p).loc[other, "gap"] for p in shares.columns)
         assert total_gap == pytest.approx(2 * (1 - fk[other]))
+
+
+# ---- bilateral partners -------------------------------------------------------
+def _bilateral_example():
+    return _frame(
+        [
+            ("LU", "DE", "TOTAL", "1", "A", "2024", 60),
+            ("LU", "DE", "72", "1", "A", "2024", 40),
+            ("LU", "DE", "84", "1", "A", "2024", 20),
+            ("LU", "US", "TOTAL", "1", "A", "2024", 30),
+            ("LU", "US", "84", "1", "A", "2024", 30),
+            ("LU", "FR", "TOTAL", "1", "A", "2024", 10),
+            ("LU", "FR", "72", "1", "A", "2024", 10),
+            ("LU", "WORLD", "TOTAL", "1", "A", "2024", 100),       # aggregate: ignored
+            ("LU", "EU27_2020", "TOTAL", "1", "A", "2024", 70),    # aggregate: ignored
+            ("LU", "QV", "TOTAL", "1", "A", "2024", 5),            # special code: ignored
+            ("LU", "DE", "TOTAL", "2", "A", "2024", 999),          # other flow: ignored
+            ("DE", "LU", "TOTAL", "1", "A", "2024", 999),          # other reporter: ignored
+            ("LU", "DE", "TOTAL", "1", "A", "2023", 50),
+            ("LU", "US", "TOTAL", "1", "A", "2023", 50),
+        ]
+    )
+
+
+def test_partner_table_uses_named_countries_only():
+    t = partner_table(_bilateral_example(), "1", "2024").set_index("partner")
+    assert list(t.index) == ["DE", "US", "FR"]
+    assert t["share"].sum() == pytest.approx(1.0)
+    assert t.loc["DE", "share"] == pytest.approx(0.6)
+    assert bool(t.loc["DE", "is_eu"]) and not bool(t.loc["US", "is_eu"])
+    # one chapter only
+    t72 = partner_table(_bilateral_example(), "1", "2024", product="72").set_index("partner")
+    assert list(t72.index) == ["DE", "FR"] and t72.loc["DE", "share"] == pytest.approx(0.8)
+
+
+def test_partner_table_sums_chapters_when_no_total_line():
+    df = _frame(
+        [
+            ("LU", "DE", "72", "2", "A", "2024", 40),
+            ("LU", "DE", "84", "2", "A", "2024", 20),
+            ("LU", "FR", "84", "2", "A", "2024", 40),
+        ]
+    )
+    t = partner_table(df, "2", "2024").set_index("partner")
+    assert t.loc["DE", "value"] == pytest.approx(60) and t.loc["DE", "share"] == pytest.approx(0.6)
+
+
+def test_partner_shares_over_time_and_product_mix():
+    long = partner_shares_over_time(_bilateral_example(), "1", ["DE", "US"]).set_index(["partner", "period"])
+    assert long.loc[("DE", "2023"), "share"] == pytest.approx(0.5)
+    assert long.loc[("DE", "2024"), "share"] == pytest.approx(0.6)
+    mix = partner_product_mix(_bilateral_example(), "1", "2024", "DE", n=1).set_index("product")
+    assert mix.loc["72", "share"] == pytest.approx(40 / 60)
+    assert mix.loc["Other chapters (1)", "value"] == pytest.approx(20)

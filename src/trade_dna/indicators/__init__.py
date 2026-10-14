@@ -10,3 +10,4 @@ from .similarity import (  # noqa: F401
 )
 from .concentration import hhi_by_product, hhi_over_time  # noqa: F401
 from .hierarchy import prune_hierarchy  # noqa: F401
+from .partners import partner_product_mix, partner_shares_over_time, partner_table  # noqa: F401

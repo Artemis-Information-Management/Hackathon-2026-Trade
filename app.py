@@ -38,8 +38,7 @@ c3.metric("Rows", f"{status.n_rows:,}")
 
 st.markdown(
     """
-Most trade dashboards answer *who* and *what*. This one asks three different questions,
-one per page in the sidebar:
+Most trade dashboards answer *who* and *what*. This one asks a different question on each page of the sidebar:
 
 | Lens | Question | Indicator |
 |---|---|---|
@@ -47,6 +46,7 @@ one per page in the sidebar:
 | **2 · Dependency points** | For which products does Luxembourg rely on a single partner? | Herfindahl-Hirschman concentration |
 | **3 · Smart zoom** | How do we show HS2 → CN8 detail without drowning the reader? | Top-k pruning of the product tree |
 | **4 · Seasonality (R)** | Which flows are seasonal, and what is left once seasonality is removed? | STL decomposition, computed in R |
+| **5 · Luxembourg's partners** | Who does Luxembourg actually trade with, country by country, and what flows between them? | Bilateral flows declared by Luxembourg (no *World* line) |
 
 Data: Eurostat Comext **ds-045409**, *EU trade since 1988 by HS2-4-6 and CN8*.
 Luxembourg is reported separately from Belgium only since **1999**, so series start there.
