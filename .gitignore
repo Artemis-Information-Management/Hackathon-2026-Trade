@@ -1,0 +1,30 @@
+# Raw Eurostat downloads can be large; regenerate with scripts/fetch_data.py or re-export
+data/raw/*
+!data/raw/.gitkeep
+
+# Processed parquet is committed on purpose (small, makes the app reproducible),
+# but the R input scratch files are not
+data/processed/r/_input_*
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+.ipynb_checkpoints/
+*.egg-info/
+
+# R
+.Rhistory
+.RData
+.Rproj.user/
+
+# Secrets and local config
+.env
+.streamlit/secrets.toml
+
+# OS / editors
+.DS_Store
+.vscode/
+.idea/
