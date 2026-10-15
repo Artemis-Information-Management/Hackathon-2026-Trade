@@ -1,0 +1,923 @@
+---
+title: "Trade cockpit – `r params$reporter` – `r params$year`"
+date: "`r format(Sys.Date(), '%d/%m/%Y')`"
+output:
+  html_document:
+    self_contained: true
+    toc: false
+    theme:
+      version: 5
+      bg: "#EEF9FD"
+      fg: "#271D67"
+      primary: "#1AADE7"
+      secondary: "#271D67"
+      base_font: !expr bslib::font_collection(bslib::font_google("Poppins", local = FALSE), "Segoe UI", "Arial", "sans-serif")
+      heading_font: !expr bslib::font_collection(bslib::font_google("Poppins", local = FALSE), "Segoe UI", "Arial", "sans-serif")
+params:
+  reporter: "Luxembourg"
+  year: 2025
+  data_path: "final_df.rds"   # .rds holding final_df, next to the Rmd (used when final_df is not found in memory)
+  top_n: 20            # partners shown in the bar charts
+  heat_n: 30           # partners shown in the heatmap
+  evo_default: "BE"    # partner selected when the page opens (annual evolution chart)
+  topojson_url: ""     # optional: folder holding plotly's world_110m.json for an offline map (default = cdn.plot.ly)
+---
+
+<!--
+Usage
+  A. Knit button in RStudio: Knit runs in a fresh R session, so final_df must be on disk.
+     Once, in the console:   saveRDS(final_df, "final_df.rds")   (next to this Rmd, or set params$data_path)
+  B. From the console with final_df in memory:
+     rmarkdown::render("trade_cockpit_LU.Rmd", envir = globalenv())
+  C. From an .rds anywhere:
+     rmarkdown::render("trade_cockpit_LU.Rmd", params = list(data_path = "M:/.../final_df.rds", year = 2025))
+
+Expected columns in final_df: PRODUCT_CODE, PRODUCT_LABEL, FLOW_CODE, FLOW_LABEL, PARTNER_CODE,
+PARTNER_LABEL, TIME, INDICATOR_CODE, VALUE_IN_EUROS (as produced by consolidate_trade_LU.R).
+The cockpit focuses on params$year; the "annual evolution" chart (click a country on the map) uses
+every year available in final_df.
+The world map base layer is fetched from cdn.plot.ly when the page opens (internet needed), unless
+params$topojson_url points to a local copy of plotly's world_110m.json.
+-->
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+
+need <- c("tidyverse", "knitr", "plotly", "htmltools", "bslib", "DT", "jsonlite", "crosstalk")
+missing_pkgs <- need[!need %in% installed.packages()[, "Package"]]
+if (length(missing_pkgs) > 0) install.packages(missing_pkgs)
+
+library(tidyverse)
+library(knitr)
+library(plotly)
+library(htmltools)
+library(DT)
+library(jsonlite)
+library(crosstalk)
+
+# ---- Graphic charter ------------------------------------------------------------------------
+COL_BG      <- "#EEF9FD"
+COL_NAVY    <- "#271D67"   # secondary / text
+COL_BLUE    <- "#1AADE7"   # primary
+COL_LAVEND  <- "#7B6FD0"
+COL_GREY    <- "#8A87A8"
+COL_RED     <- "#D7263D"
+FONT_FAMILY <- "Poppins, 'Segoe UI', Arial, sans-serif"
+
+# Flow colours: one hue per flow, never swapped (checked for colour-blind separation and 3:1 contrast)
+FLOW_COLORS <- c(IMPORT = "#0E8FC2", EXPORT = "#D97A06")
+FLOW_LABELS <- c(IMPORT = "Imports", EXPORT = "Exports")
+
+# Sequential scale for magnitudes (one hue, light -> dark)
+SEQ_SCALE <- list(c(0, "#E6F4FB"), c(0.25, "#A9DCF3"), c(0.5, "#1AADE7"), c(0.75, "#0E6FA6"), c(1, "#271D67"))
+# Lighter half of the same ramp, for tiles that carry dark text (treemap)
+SEQ_SCALE_LIGHT <- list(c(0, "#EEF7FC"), c(0.5, "#A9DCF3"), c(1, "#5FC4EE"))
+
+KEY_SEP <- "||"
+
+# Crosstalk: the map and the "annual evolution" chart share one selection group, keyed by partner code
+CT_GROUP  <- "partner"
+SANKEY_N  <- 12          # origins / destinations shown by name in the sankey (the rest = "Other")
+```
+
+```{=html}
+<style>
+/* ---- Page = cockpit (no rmarkdown title block, full width) ----------------------------- */
+#header { display: none; }
+.main-container { max-width: none !important; width: 100%; padding: 0 !important; margin: 0; }
+body { background: #EEF9FD; }
+
+.cockpit { display: grid; grid-template-columns: 300px minmax(0, 1fr); min-height: 100vh; }
+
+/* ---- Sidebar ---------------------------------------------------------------------------- */
+.cockpit-side {
+  position: sticky; top: 0; height: 100vh; overflow-y: auto;
+  background: #271D67; color: #FFFFFF; padding: 22px 20px;
+  display: flex; flex-direction: column; gap: 22px;
+}
+.cockpit-brand .eyebrow { font-size: 0.75em; letter-spacing: .12em; text-transform: uppercase; color: #1AADE7; }
+.cockpit-brand .geo { font-size: 2.2em; font-weight: 700; line-height: 1.1; }
+.cockpit-brand .sub { font-size: 0.8em; opacity: .75; }
+.cockpit-side .control-label { color: #FFFFFF; font-weight: 600; font-size: 0.85em;
+  text-transform: uppercase; letter-spacing: .06em; margin-bottom: 6px; display: block; }
+.cockpit-side .form-select { border-radius: 8px; border: 0; font-size: 0.9em; color: #271D67; }
+.cockpit-side .hint { font-size: 0.75em; opacity: .7; margin-top: 6px; }
+
+/* Flow = pill buttons */
+.pill-group { display: flex; flex-wrap: wrap; gap: 8px; }
+.pill-group label {
+  display: inline-flex; align-items: center; gap: 6px; margin: 0;
+  padding: 5px 16px; border: 1.5px solid #FFFFFF; border-radius: 999px;
+  cursor: pointer; font-weight: 500; transition: background .15s, border-color .15s;
+}
+.pill-group input { display: none; }
+.pill-group label:has(input:checked) { background: #1AADE7; border-color: #1AADE7; }
+
+.side-legend { font-size: 0.8em; display: flex; flex-direction: column; gap: 6px; }
+.side-legend .swatch { display: inline-block; width: 18px; height: 12px; margin-right: 8px; border-radius: 3px; vertical-align: -1px; }
+.side-footer { margin-top: auto; font-size: 0.75em; opacity: .7; }
+.side-footer details summary { cursor: pointer; }
+.side-footer code { color: #FFFFFF; background: rgba(255,255,255,.12); font-size: 0.95em; }
+
+/* ---- Main area -------------------------------------------------------------------------- */
+.cockpit-main { padding: 22px 28px 40px 28px; min-width: 0; }
+.proc-title { color: #271D67; font-weight: 700; margin: 0 0 4px 0; font-size: 1.7em; }
+.proc-sub { color: #4A4380; font-size: 0.9em; margin: 0 0 16px 0; }
+
+.kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 18px; }
+.kpi { background: #FFFFFF; border-radius: 10px; padding: 12px 16px; border-left: 4px solid #1AADE7;
+  box-shadow: 0 1px 3px rgba(39,29,103,.08); }
+.kpi-value { font-size: 1.5em; font-weight: 700; color: #271D67; line-height: 1.2; }
+.kpi-label { font-size: 0.75em; color: #4A4380; text-transform: uppercase; letter-spacing: .05em; }
+.kpi-note  { font-size: 0.75em; color: #8A87A8; }
+
+.card-box { background: #FFFFFF; border-radius: 10px; padding: 14px 16px; margin-bottom: 18px;
+  box-shadow: 0 1px 3px rgba(39,29,103,.08); min-width: 0; }
+.card-title { font-size: 0.85em; font-weight: 600; text-transform: uppercase; letter-spacing: .06em;
+  color: #1AADE7; margin: 0 0 2px 0; }
+.card-sub { font-size: 0.8em; color: #4A4380; margin: 0 0 10px 0; }
+.card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(520px, 1fr)); gap: 18px; }
+.card-grid .card-box { margin-bottom: 0; }
+.card-grid { margin-bottom: 18px; }
+
+/* ---- DataTables ------------------------------------------------------------------------- */
+table.dataTable thead th { background-color: #271D67 !important; color: #FFFFFF !important; font-weight: 600; }
+table.dataTable thead input { width: 100%; font-size: 11px; }
+table.dataTable { font-size: 12px; }
+table.dataTable td { padding: 4px 6px !important; }
+.dt-buttons .btn { background: #271D67; color: #FFFFFF; border: 0; border-radius: 8px; font-size: 0.8em; margin-right: 6px; }
+
+@media (max-width: 1000px) {
+  .cockpit { grid-template-columns: 1fr; }
+  .cockpit-side { position: static; height: auto; }
+  .card-grid { grid-template-columns: 1fr; }
+}
+</style>
+```
+
+```{r load-data}
+# final_df: taken from the global environment when it is there (rmarkdown::render(..., envir = globalenv())),
+# otherwise read from params$data_path. The RStudio "Knit" button renders in a fresh R session, so in that
+# case the .rds file is needed: saveRDS(final_df, "final_df.rds").
+if (exists("final_df", envir = globalenv(), inherits = FALSE)) {
+  final_df <- get("final_df", envir = globalenv())
+} else if (nzchar(params$data_path) && file.exists(params$data_path)) {
+  final_df <- readRDS(params$data_path)
+} else {
+  stop(
+    "final_df not found.\n",
+    "  - Knit button: save it first with  saveRDS(final_df, \"", params$data_path, "\")  next to the Rmd,\n",
+    "    or set params$data_path to the .rds file.\n",
+    "  - Console: rmarkdown::render(\"trade_cockpit_LU.Rmd\", envir = globalenv())"
+  )
+}
+
+needed <- c("PRODUCT_CODE", "PRODUCT_LABEL", "FLOW_LABEL", "PARTNER_CODE", "PARTNER_LABEL", "TIME", "VALUE_IN_EUROS")
+if (!all(needed %in% names(final_df))) {
+  stop("final_df is missing column(s): ", paste(setdiff(needed, names(final_df)), collapse = ", "))
+}
+
+# ---- Partner codes: keep real countries only ------------------------------------------------
+# Eurostat partner codes = ISO 3166-1 alpha-2, except EL (Greece), UK (United Kingdom) and a few
+# non-ISO codes (XK Kosovo, XS Serbia, XM Montenegro...). Everything else (EU27_2020, WORLD,
+# EXT_EU, QV/QW/QY/QZ "not specified", QS stores & provisions, XC Ceuta...) is an aggregate or a
+# statistical territory and is dropped. The alpha-3 code is what plotly needs for the world map.
+ISO_A3 <- c(
+  AD="AND", AE="ARE", AF="AFG", AG="ATG", AI="AIA", AL="ALB", AM="ARM", AO="AGO", AQ="ATA",
+  AR="ARG", AS="ASM", AT="AUT", AU="AUS", AW="ABW", AX="ALA", AZ="AZE", BA="BIH", BB="BRB",
+  BD="BGD", BE="BEL", BF="BFA", BG="BGR", BH="BHR", BI="BDI", BJ="BEN", BL="BLM", BM="BMU",
+  BN="BRN", BO="BOL", BQ="BES", BR="BRA", BS="BHS", BT="BTN", BV="BVT", BW="BWA", BY="BLR",
+  BZ="BLZ", CA="CAN", CC="CCK", CD="COD", CF="CAF", CG="COG", CH="CHE", CI="CIV", CK="COK",
+  CL="CHL", CM="CMR", CN="CHN", CO="COL", CR="CRI", CU="CUB", CV="CPV", CW="CUW", CX="CXR",
+  CY="CYP", CZ="CZE", DE="DEU", DJ="DJI", DK="DNK", DM="DMA", DO="DOM", DZ="DZA", EC="ECU",
+  EE="EST", EG="EGY", EH="ESH", ER="ERI", ES="ESP", ET="ETH", FI="FIN", FJ="FJI", FK="FLK",
+  FM="FSM", FO="FRO", FR="FRA", GA="GAB", GB="GBR", GD="GRD", GE="GEO", GF="GUF", GG="GGY",
+  GH="GHA", GI="GIB", GL="GRL", GM="GMB", GN="GIN", GP="GLP", GQ="GNQ", GR="GRC", GS="SGS",
+  GT="GTM", GU="GUM", GW="GNB", GY="GUY", HK="HKG", HM="HMD", HN="HND", HR="HRV", HT="HTI",
+  HU="HUN", ID="IDN", IE="IRL", IL="ISR", IM="IMN", IN="IND", IO="IOT", IQ="IRQ", IR="IRN",
+  IS="ISL", IT="ITA", JE="JEY", JM="JAM", JO="JOR", JP="JPN", KE="KEN", KG="KGZ", KH="KHM",
+  KI="KIR", KM="COM", KN="KNA", KP="PRK", KR="KOR", KW="KWT", KY="CYM", KZ="KAZ", LA="LAO",
+  LB="LBN", LC="LCA", LI="LIE", LK="LKA", LR="LBR", LS="LSO", LT="LTU", LU="LUX", LV="LVA",
+  LY="LBY", MA="MAR", MC="MCO", MD="MDA", ME="MNE", MF="MAF", MG="MDG", MH="MHL", MK="MKD",
+  ML="MLI", MM="MMR", MN="MNG", MO="MAC", MP="MNP", MQ="MTQ", MR="MRT", MS="MSR", MT="MLT",
+  MU="MUS", MV="MDV", MW="MWI", MX="MEX", MY="MYS", MZ="MOZ", NC="NCL", NE="NER", NF="NFK",
+  NG="NGA", NI="NIC", NL="NLD", NO="NOR", NP="NPL", NR="NRU", NU="NIU", NZ="NZL", OM="OMN",
+  PA="PAN", PE="PER", PF="PYF", PG="PNG", PH="PHL", PK="PAK", PL="POL", PM="SPM", PN="PCN",
+  PR="PRI", PS="PSE", PT="PRT", PW="PLW", PY="PRY", QA="QAT", RE="REU", RO="ROU", RS="SRB",
+  RU="RUS", RW="RWA", SA="SAU", SB="SLB", SC="SYC", SD="SDN", SE="SWE", SG="SGP", SH="SHN",
+  SI="SVN", SJ="SJM", SK="SVK", SL="SLE", SM="SMR", SN="SEN", SO="SOM", SR="SUR", SS="SSD",
+  ST="STP", SV="SLV", SX="SXM", SY="SYR", SZ="SWZ", TC="TCA", TD="TCD", TF="ATF", TG="TGO",
+  TH="THA", TJ="TJK", TK="TKL", TL="TLS", TM="TKM", TN="TUN", TO="TON", TR="TUR", TT="TTO",
+  TV="TUV", TW="TWN", TZ="TZA", UA="UKR", UG="UGA", UM="UMI", US="USA", UY="URY", UZ="UZB",
+  VA="VAT", VC="VCT", VE="VEN", VG="VGB", VI="VIR", VN="VNM", VU="VUT", WF="WLF", WS="WSM",
+  YE="YEM", YT="MYT", ZA="ZAF", ZM="ZMB", ZW="ZWE", "NA"="NAM",
+  # Eurostat-specific codes
+  EL="GRC", UK="GBR", XK="XKX", XS="SRB", XM="MNE"
+)
+
+raw_all <- final_df %>%
+  mutate(
+    PARTNER_CODE = if_else(is.na(PARTNER_CODE), "NA", as.character(PARTNER_CODE)),  # Namibia
+    TIME         = as.integer(TIME),
+    VALUE        = as.numeric(VALUE_IN_EUROS),
+    FLOW         = toupper(FLOW_LABEL)
+  ) %>%
+  filter(!is.na(VALUE), FLOW %in% names(FLOW_COLORS))
+
+raw <- filter(raw_all, TIME == params$year)
+if (nrow(raw) == 0) stop("No row for year ", params$year, " in final_df")
+
+excluded_codes <- raw %>%
+  filter(!PARTNER_CODE %in% names(ISO_A3)) %>%
+  distinct(PARTNER_CODE, PARTNER_LABEL) %>%
+  arrange(PARTNER_CODE)
+
+trade_all <- raw_all %>%
+  filter(PARTNER_CODE %in% names(ISO_A3)) %>%
+  mutate(
+    ISO3    = unname(ISO_A3[PARTNER_CODE]),
+    # "Belgium (incl. Luxembourg 'LU' -> 1998)" -> "Belgium"
+    PARTNER = str_squish(str_remove(PARTNER_LABEL, "\\s*\\(.*$"))
+  )
+trade <- filter(trade_all, TIME == params$year)
+years_all <- sort(unique(trade_all$TIME))
+
+# ---- Products ---------------------------------------------------------------------------------
+# "All products": Eurostat's own TOTAL when present, otherwise the sum of the HS2 chapters.
+has_total <- "TOTAL" %in% trade$PRODUCT_CODE
+
+products <- trade %>%
+  filter(PRODUCT_CODE != "TOTAL") %>%
+  distinct(PRODUCT_CODE, PRODUCT_LABEL) %>%
+  arrange(PRODUCT_CODE) %>%
+  mutate(PRODUCT_NAME = str_to_sentence(PRODUCT_LABEL),
+         PRODUCT_NAME = if_else(nchar(PRODUCT_NAME) > 60, paste0(str_sub(PRODUCT_NAME, 1, 57), "..."), PRODUCT_NAME),
+         PRODUCT_OPT  = paste0(PRODUCT_CODE, " · ", PRODUCT_NAME))
+
+# One row per product x flow x partner (products + "TOTAL" = all products)
+by_partner <- trade %>%
+  filter(PRODUCT_CODE != "TOTAL") %>%
+  group_by(PRODUCT_CODE, FLOW, PARTNER_CODE, PARTNER, ISO3) %>%
+  summarise(VALUE = sum(VALUE), .groups = "drop")
+
+total_rows <- if (has_total) {
+  trade %>% filter(PRODUCT_CODE == "TOTAL") %>%
+    group_by(FLOW, PARTNER_CODE, PARTNER, ISO3) %>%
+    summarise(VALUE = sum(VALUE), .groups = "drop")
+} else {
+  by_partner %>% group_by(FLOW, PARTNER_CODE, PARTNER, ISO3) %>%
+    summarise(VALUE = sum(VALUE), .groups = "drop")
+}
+by_partner <- bind_rows(by_partner, mutate(total_rows, PRODUCT_CODE = "TOTAL")) %>%
+  filter(VALUE > 0)
+
+product_keys <- c("TOTAL", products$PRODUCT_CODE)
+product_names <- c(TOTAL = "All products", setNames(products$PRODUCT_NAME, products$PRODUCT_CODE))
+
+# Flow totals per product (denominator of the shares)
+flow_totals <- by_partner %>% group_by(PRODUCT_CODE, FLOW) %>% summarise(TOTAL = sum(VALUE), .groups = "drop")
+```
+
+```{r helpers}
+fmt_eur <- function(x) {
+  dplyr::case_when(
+    is.na(x)        ~ "–",
+    abs(x) >= 1e9   ~ sprintf("%.2f bn €", x / 1e9),
+    abs(x) >= 1e6   ~ sprintf("%.1f M€", x / 1e6),
+    abs(x) >= 1e3   ~ sprintf("%.0f k€", x / 1e3),
+    TRUE            ~ sprintf("%.0f €", x)
+  )
+}
+fmt_pct <- function(x) ifelse(is.na(x), "–", sprintf("%.1f%%", 100 * x))
+key_of  <- function(product, flow) paste(product, flow, sep = KEY_SEP)
+
+theme_plotly <- function(p) {
+  p %>%
+    layout(
+      font          = list(family = FONT_FAMILY, color = COL_NAVY),
+      paper_bgcolor = "rgba(0,0,0,0)",
+      plot_bgcolor  = "#FFFFFF",
+      hoverlabel    = list(font = list(family = FONT_FAMILY))
+    ) %>%
+    config(displaylogo = FALSE, modeBarButtonsToRemove = c("lasso2d", "select2d"),
+           topojsonURL = if (nzchar(params$topojson_url)) params$topojson_url else NULL)
+}
+axis_style <- list(gridcolor = "#DDEFF8", zerolinecolor = "#C9C4EC", linecolor = COL_NAVY)
+
+# Wraps a plotly widget so the sidebar can switch the visible trace:
+#   data-keys = key of each trace (same order as the traces), data-keyby = "flow" | "product"
+keyed <- function(p, keys, keyby, height) {
+  p$height <- height
+  div(class = "keyed", `data-keys` = toJSON(keys), `data-keyby` = keyby, p)
+}
+
+kpi <- function(id, label, note = "") {
+  div(class = "kpi", div(class = "kpi-value", id = paste0("kpi-", id), "–"),
+      div(class = "kpi-label", label), div(class = "kpi-note", id = paste0("kpi-", id, "-note"), note))
+}
+```
+
+```{r kpis}
+# One entry per (product, flow) -> updated by the sidebar
+kpi_tbl <- by_partner %>%
+  group_by(PRODUCT_CODE, FLOW) %>%
+  arrange(desc(VALUE), .by_group = TRUE) %>%
+  summarise(
+    total     = sum(VALUE),
+    partners  = n(),
+    top1      = first(PARTNER),
+    top1_sh   = first(VALUE) / sum(VALUE),
+    top5_sh   = sum(head(VALUE, 5)) / sum(VALUE),
+    .groups = "drop"
+  )
+
+balance_tbl <- flow_totals %>%
+  pivot_wider(names_from = FLOW, values_from = TOTAL, values_fill = 0) %>%
+  mutate(balance = EXPORT - IMPORT, cover = if_else(IMPORT > 0, EXPORT / IMPORT, NA_real_))
+
+kpi_json <- kpi_tbl %>%
+  left_join(balance_tbl, by = "PRODUCT_CODE") %>%
+  mutate(
+    key       = key_of(PRODUCT_CODE, FLOW),
+    total_f   = fmt_eur(total),
+    top1_f    = top1,
+    top1_note = paste0(fmt_pct(top1_sh), " of the flow"),
+    top5_f    = fmt_pct(top5_sh),
+    balance_f = paste0(if_else(balance >= 0, "+", "−"), fmt_eur(abs(balance))),
+    balance_note = if_else(is.na(cover), "", sprintf("exports / imports = %.2f", cover))
+  ) %>%
+  select(key, total_f, partners, top1_f, top1_note, top5_f, balance_f, balance_note) %>%
+  split(.$key) %>%
+  map(~ as.list(.x[1, -1]))
+```
+
+```{r widgets}
+# ---------------------------------------------------------------------------------------------
+# 1. WORLD MAP - one choropleth trace per (product, flow); colour = log10(value), same scale
+#    for every selection so colours stay comparable when the user switches product or flow.
+# ---------------------------------------------------------------------------------------------
+map_data <- by_partner %>%
+  left_join(flow_totals, by = c("PRODUCT_CODE", "FLOW")) %>%
+  mutate(Z = log10(VALUE), SHARE = VALUE / TOTAL,
+         HOVER = sprintf("<b>%s</b><br>%s: %s<br>Share of the flow: %s", PARTNER, FLOW_LABELS[FLOW], fmt_eur(VALUE), fmt_pct(SHARE)))
+
+z_rng <- c(3, ceiling(max(map_data$Z)))                       # 1 k€ -> max
+cb_ticks <- seq(z_rng[1], z_rng[2], by = 1)
+cb_text  <- fmt_eur(10^cb_ticks)
+
+map_keys <- character(0)
+p_map <- plot_geo()
+for (pk in product_keys) for (fl in names(FLOW_COLORS)) {
+  d <- filter(map_data, PRODUCT_CODE == pk, FLOW == fl)
+  if (nrow(d) == 0) next
+  map_keys <- c(map_keys, key_of(pk, fl))
+  p_map <- p_map %>% add_trace(
+    type = "choropleth", data = d,
+    customdata = ~PARTNER_CODE,                          # partner code sent to crosstalk on click
+    locations = ~ISO3, z = ~Z, text = ~HOVER, hoverinfo = "text",
+    colorscale = SEQ_SCALE, zmin = z_rng[1], zmax = z_rng[2],
+    marker = list(line = list(color = "#FFFFFF", width = 0.5)),
+    colorbar = list(title = list(text = "Value (log scale)", font = list(size = 11)),
+                    tickvals = cb_ticks, ticktext = cb_text, len = 0.7, thickness = 12,
+                    outlinewidth = 0, x = 1.0),
+    visible = (pk == "TOTAL" && fl == "IMPORT")
+  )
+}
+p_map <- p_map %>%
+  layout(
+    geo = list(projection = list(type = "natural earth"), showframe = FALSE, showcoastlines = FALSE,
+               showcountries = TRUE, countrycolor = "#DDEFF8", landcolor = "#F4F6FA",
+               showocean = TRUE, oceancolor = "#FFFFFF", bgcolor = "rgba(0,0,0,0)",
+               lataxis = list(range = c(-58, 85))),
+    margin = list(l = 0, r = 0, t = 10, b = 0)
+  ) %>%
+  # Last trace = outline of the selected partner, driven by the crosstalk selection (see the JS):
+  # clicking a country sends its code to crosstalk group CT_GROUP, every widget in the group follows.
+  add_trace(
+    type = "choropleth", locations = list(), z = list(),
+    colorscale = list(c(0, COL_RED), c(1, COL_RED)), showscale = FALSE,
+    marker = list(opacity = 0.45, line = list(color = COL_RED, width = 3)), hoverinfo = "skip", name = "selected"
+  ) %>%
+  theme_plotly()
+
+# ---------------------------------------------------------------------------------------------
+# 1b. ANNUAL EVOLUTION of the selected partner - every year of final_df, imports vs exports.
+#     The traces are empty here: the page fills them from TRADE_TS (JSON below) when the
+#     crosstalk selection changes (click on the map) or when the product changes.
+# ---------------------------------------------------------------------------------------------
+ts_data <- trade_all %>%
+  filter(PRODUCT_CODE != "TOTAL") %>%
+  group_by(PARTNER_CODE, PRODUCT_CODE, FLOW, TIME) %>%
+  summarise(VALUE = sum(VALUE), .groups = "drop")
+ts_total <- if (has_total) {
+  trade_all %>% filter(PRODUCT_CODE == "TOTAL") %>%
+    group_by(PARTNER_CODE, FLOW, TIME) %>% summarise(VALUE = sum(VALUE), .groups = "drop")
+} else {
+  ts_data %>% group_by(PARTNER_CODE, FLOW, TIME) %>% summarise(VALUE = sum(VALUE), .groups = "drop")
+}
+ts_json <- bind_rows(ts_data, mutate(ts_total, PRODUCT_CODE = "TOTAL")) %>%
+  filter(VALUE > 0) %>%
+  arrange(PARTNER_CODE, PRODUCT_CODE, FLOW, TIME) %>%
+  group_by(k = paste(PARTNER_CODE, PRODUCT_CODE, FLOW, sep = KEY_SEP)) %>%
+  summarise(y = list(TIME), v = list(VALUE), .groups = "drop")
+
+partner_names <- trade_all %>% distinct(PARTNER_CODE, PARTNER) %>% arrange(PARTNER_CODE)
+evo_default <- if (params$evo_default %in% partner_names$PARTNER_CODE) params$evo_default else
+  (by_partner %>% filter(PRODUCT_CODE == "TOTAL", FLOW == "IMPORT") %>% slice_max(VALUE, n = 1) %>% pull(PARTNER_CODE))
+
+p_evo <- plot_ly()
+for (fl in names(FLOW_COLORS)) {
+  p_evo <- p_evo %>% add_trace(
+    type = "bar", x = years_all, y = rep(NA_real_, length(years_all)), name = FLOW_LABELS[[fl]],
+    marker = list(color = FLOW_COLORS[[fl]], line = list(color = "#FFFFFF", width = 1)),
+    hovertemplate = paste0("%{x}: %{y:,.0f} €<extra>", FLOW_LABELS[[fl]], "</extra>")
+  )
+}
+p_evo <- p_evo %>%
+  layout(
+    barmode = "group", bargap = 0.25, bargroupgap = 0.05,
+    xaxis = c(axis_style, list(title = "", dtick = 1, tickangle = -45, tickfont = list(size = 10),
+                               range = range(years_all) + c(-0.6, 0.6))),
+    yaxis = c(axis_style, list(title = "", tickformat = "~s", ticksuffix = "€", rangemode = "tozero")),
+    legend = list(orientation = "h", x = 0.5, xanchor = "center", y = -0.22, font = list(size = 11)),
+    margin = list(l = 10, r = 10, t = 20, b = 60)
+  ) %>%
+  theme_plotly()
+
+# ---------------------------------------------------------------------------------------------
+# 1c. SANKEY - origins -> Luxembourg -> destinations for the selected product (one trace per product).
+#     Left = where the imports come from, right = where the exports go; width = value.
+#     Hovering a node highlights its links (native plotly behaviour).
+# ---------------------------------------------------------------------------------------------
+rgba <- function(hex, a) { r <- col2rgb(hex); sprintf("rgba(%d,%d,%d,%.2f)", r[1], r[2], r[3], a) }
+
+sankey_side <- function(d, other_lbl) {
+  d <- arrange(d, desc(VALUE))
+  if (nrow(d) > SANKEY_N) {
+    d <- bind_rows(head(d, SANKEY_N),
+                   tibble(PARTNER = other_lbl, VALUE = sum(d$VALUE[-(1:SANKEY_N)])))
+  }
+  d
+}
+
+p_sankey <- plot_ly()
+sankey_keys <- character(0)
+for (pk in product_keys) {
+  imp <- by_partner %>% filter(PRODUCT_CODE == pk, FLOW == "IMPORT") %>% select(PARTNER, VALUE) %>%
+    sankey_side(sprintf("Other origins"))
+  exp <- by_partner %>% filter(PRODUCT_CODE == pk, FLOW == "EXPORT") %>% select(PARTNER, VALUE) %>%
+    sankey_side(sprintf("Other destinations"))
+  if (nrow(imp) + nrow(exp) == 0) next
+  sankey_keys <- c(sankey_keys, pk)
+
+  nodes <- c(imp$PARTNER, params$reporter, exp$PARTNER)
+  i_lu  <- nrow(imp)                                             # 0-based index of the centre node
+  src   <- c(seq_len(nrow(imp)) - 1, rep(i_lu, nrow(exp)))
+  tgt   <- c(rep(i_lu, nrow(imp)), i_lu + seq_len(nrow(exp)))
+  val   <- c(imp$VALUE, exp$VALUE)
+  link_flow <- c(rep("IMPORT", nrow(imp)), rep("EXPORT", nrow(exp)))
+  link_lbl  <- c(sprintf("%s → %s<br>Imports: %s (%s of imports)", imp$PARTNER, params$reporter, fmt_eur(imp$VALUE), fmt_pct(imp$VALUE / sum(imp$VALUE))),
+                 sprintf("%s → %s<br>Exports: %s (%s of exports)", params$reporter, exp$PARTNER, fmt_eur(exp$VALUE), fmt_pct(exp$VALUE / sum(exp$VALUE))))
+  node_lbl  <- c(sprintf("%s<br>Imports: %s", imp$PARTNER, fmt_eur(imp$VALUE)),
+                 sprintf("%s<br>Imports: %s · Exports: %s", params$reporter, fmt_eur(sum(imp$VALUE)), fmt_eur(sum(exp$VALUE))),
+                 sprintf("%s<br>Exports: %s", exp$PARTNER, fmt_eur(exp$VALUE)))
+  node_col  <- c(rep(FLOW_COLORS[["IMPORT"]], nrow(imp)), COL_NAVY, rep(FLOW_COLORS[["EXPORT"]], nrow(exp)))
+  node_x    <- c(rep(0.01, nrow(imp)), 0.5, rep(0.99, nrow(exp)))
+
+  p_sankey <- p_sankey %>% add_trace(
+    type = "sankey", arrangement = "snap", orientation = "h",
+    node = list(label = nodes, color = node_col, pad = 10, thickness = 16,
+                line = list(color = "#FFFFFF", width = 1),
+                customdata = node_lbl, hovertemplate = "%{customdata}<extra></extra>"),
+    link = list(source = src, target = tgt, value = val,
+                color = ifelse(link_flow == "IMPORT", rgba(FLOW_COLORS[["IMPORT"]], 0.35), rgba(FLOW_COLORS[["EXPORT"]], 0.35)),
+                customdata = link_lbl, hovertemplate = "%{customdata}<extra></extra>"),
+    textfont = list(family = FONT_FAMILY, size = 11, color = COL_NAVY),
+    visible = (pk == "TOTAL")
+  )
+}
+p_sankey <- p_sankey %>% layout(margin = list(l = 10, r = 10, t = 10, b = 10)) %>% theme_plotly()
+
+# ---------------------------------------------------------------------------------------------
+# 2. TOP PARTNERS - horizontal bars, one trace per (product, flow)
+# ---------------------------------------------------------------------------------------------
+top_data <- map_data %>%
+  group_by(PRODUCT_CODE, FLOW) %>%
+  slice_max(VALUE, n = params$top_n, with_ties = FALSE) %>%
+  arrange(VALUE, .by_group = TRUE) %>%
+  ungroup()
+
+top_keys <- character(0)
+p_top <- plot_ly()
+for (pk in product_keys) for (fl in names(FLOW_COLORS)) {
+  d <- filter(top_data, PRODUCT_CODE == pk, FLOW == fl)
+  if (nrow(d) == 0) next
+  top_keys <- c(top_keys, key_of(pk, fl))
+  p_top <- p_top %>% add_bars(
+    data = d, x = ~VALUE, y = ~PARTNER, orientation = "h",
+    marker = list(color = FLOW_COLORS[[fl]], line = list(color = "#FFFFFF", width = 1)),
+    text = ~fmt_pct(SHARE), textposition = "outside", textfont = list(size = 10, color = COL_NAVY),
+    cliponaxis = FALSE,
+    hovertext = ~HOVER, hoverinfo = "text",
+    visible = (pk == "TOTAL" && fl == "IMPORT"), showlegend = FALSE
+  )
+}
+p_top <- p_top %>%
+  layout(
+    xaxis = c(axis_style, list(title = "", tickformat = "~s", ticksuffix = "€")),
+    yaxis = c(axis_style, list(title = "", categoryorder = "trace", automargin = TRUE, tickfont = list(size = 11))),
+    bargap = 0.25, margin = list(l = 10, r = 50, t = 10, b = 30)
+  ) %>%
+  theme_plotly()
+
+# ---------------------------------------------------------------------------------------------
+# 3. TRADE BALANCE BY PARTNER - exports minus imports, one trace per product
+#    (partners = the top_n partners by total trade of that product)
+# ---------------------------------------------------------------------------------------------
+bal_data <- by_partner %>%
+  group_by(PRODUCT_CODE, PARTNER) %>%
+  summarise(IMPORT = sum(VALUE[FLOW == "IMPORT"]), EXPORT = sum(VALUE[FLOW == "EXPORT"]), .groups = "drop") %>%
+  mutate(TOTAL = IMPORT + EXPORT, BALANCE = EXPORT - IMPORT) %>%
+  group_by(PRODUCT_CODE) %>%
+  slice_max(TOTAL, n = params$top_n, with_ties = FALSE) %>%
+  arrange(BALANCE, .by_group = TRUE) %>%
+  ungroup() %>%
+  mutate(HOVER = sprintf("<b>%s</b><br>Exports: %s<br>Imports: %s<br>Balance: %s%s",
+                         PARTNER, fmt_eur(EXPORT), fmt_eur(IMPORT), if_else(BALANCE >= 0, "+", "−"), fmt_eur(abs(BALANCE))),
+         COLOR = if_else(BALANCE >= 0, FLOW_COLORS[["EXPORT"]], FLOW_COLORS[["IMPORT"]]))
+
+bal_keys <- character(0)
+p_bal <- plot_ly()
+for (pk in product_keys) {
+  d <- filter(bal_data, PRODUCT_CODE == pk)
+  if (nrow(d) == 0) next
+  bal_keys <- c(bal_keys, pk)
+  p_bal <- p_bal %>% add_bars(
+    data = d, x = ~BALANCE, y = ~PARTNER, orientation = "h",
+    marker = list(color = ~COLOR, line = list(color = "#FFFFFF", width = 1)),
+    hovertext = ~HOVER, hoverinfo = "text",
+    visible = (pk == "TOTAL"), showlegend = FALSE
+  )
+}
+p_bal <- p_bal %>%
+  layout(
+    xaxis = c(axis_style, list(title = "Exports − imports", tickformat = "~s", ticksuffix = "€", zerolinewidth = 2)),
+    yaxis = c(axis_style, list(title = "", categoryorder = "trace", automargin = TRUE, tickfont = list(size = 11))),
+    bargap = 0.25, margin = list(l = 10, r = 20, t = 10, b = 40)
+  ) %>%
+  theme_plotly()
+
+# ---------------------------------------------------------------------------------------------
+# 4. PRODUCT MIX - treemap of the HS2 chapters, one trace per flow
+# ---------------------------------------------------------------------------------------------
+mix_data <- flow_totals %>%
+  filter(PRODUCT_CODE != "TOTAL") %>%
+  left_join(products, by = "PRODUCT_CODE") %>%
+  group_by(FLOW) %>% mutate(SHARE = TOTAL / sum(TOTAL)) %>% ungroup() %>%
+  mutate(SHORT = if_else(nchar(PRODUCT_NAME) > 34, paste0(str_sub(PRODUCT_NAME, 1, 32), "…"), PRODUCT_NAME),
+         LABEL = if_else(SHARE >= 0.02, paste0("<b>", PRODUCT_CODE, "</b><br>", SHORT), PRODUCT_CODE),
+         HOVER = sprintf("<b>%s – %s</b><br>%s<br>Share: %s", PRODUCT_CODE, PRODUCT_NAME, fmt_eur(TOTAL), fmt_pct(SHARE)))
+
+p_mix <- plot_ly()
+mix_keys <- character(0)
+for (fl in names(FLOW_COLORS)) {
+  d <- filter(mix_data, FLOW == fl)
+  if (nrow(d) == 0) next
+  mix_keys <- c(mix_keys, fl)
+  p_mix <- p_mix %>% add_trace(
+    type = "treemap", data = d,
+    labels = ~LABEL, parents = "", values = ~TOTAL, ids = ~PRODUCT_CODE,
+    text = ~fmt_pct(SHARE), textinfo = "label+text", textfont = list(size = 12),
+    root = list(color = "#FFFFFF"), pathbar = list(visible = FALSE),
+    hovertext = ~HOVER, hoverinfo = "text",
+    marker = list(colors = ~SHARE, colorscale = SEQ_SCALE_LIGHT, cmin = 0, cmax = max(mix_data$SHARE),
+                  showscale = FALSE, line = list(color = "#FFFFFF", width = 2)),
+    tiling = list(pad = 0), visible = (fl == "IMPORT")
+  )
+}
+p_mix <- p_mix %>% layout(margin = list(l = 0, r = 0, t = 10, b = 0)) %>% theme_plotly()
+
+# ---------------------------------------------------------------------------------------------
+# 5. HEATMAP partners x products - share of each chapter in the partner's flow, one trace per flow
+# ---------------------------------------------------------------------------------------------
+heat_data <- by_partner %>%
+  filter(PRODUCT_CODE != "TOTAL") %>%
+  group_by(FLOW) %>%
+  mutate(TOP = PARTNER %in% (total_rows %>% filter(FLOW == first(FLOW)) %>% slice_max(VALUE, n = params$heat_n) %>% pull(PARTNER))) %>%
+  ungroup() %>%
+  filter(TOP) %>%
+  group_by(FLOW, PARTNER) %>% mutate(SHARE = VALUE / sum(VALUE), PTOT = sum(VALUE)) %>% ungroup() %>%
+  left_join(products, by = "PRODUCT_CODE") %>%
+  mutate(HOVER = sprintf("<b>%s</b> · %s %s<br>%s<br>%s of the partner's %s", PARTNER, PRODUCT_CODE, PRODUCT_NAME,
+                         fmt_eur(VALUE), fmt_pct(SHARE), tolower(FLOW_LABELS[FLOW])))
+
+heat_cap <- min(1, ceiling(quantile(heat_data$SHARE, 0.98) * 20) / 20)   # colour saturates above this share
+
+p_heat <- plot_ly()
+for (fl in names(FLOW_COLORS)) {
+  d <- filter(heat_data, FLOW == fl)
+  if (nrow(d) == 0) next
+  order_p <- d %>% distinct(PARTNER, PTOT) %>% arrange(desc(PTOT)) %>% pull(PARTNER)
+  grid <- d %>% select(PARTNER, PRODUCT_CODE, SHARE, HOVER) %>%
+    complete(PARTNER = order_p, PRODUCT_CODE = products$PRODUCT_CODE) %>%
+    mutate(PARTNER = factor(PARTNER, levels = order_p)) %>% arrange(PARTNER, PRODUCT_CODE)
+  zmat <- matrix(grid$SHARE, nrow = length(order_p), byrow = TRUE)
+  hmat <- matrix(replace_na(grid$HOVER, ""), nrow = length(order_p), byrow = TRUE)
+  p_heat <- p_heat %>% add_trace(
+    type = "heatmap", x = products$PRODUCT_CODE, y = order_p, z = zmat,
+    text = hmat, hoverinfo = "text",
+    colorscale = SEQ_SCALE, zmin = 0, zmax = heat_cap, xgap = 1, ygap = 1,
+    colorbar = list(title = list(text = sprintf("Share<br>(≥ %.0f%% = darkest)", 100 * heat_cap), font = list(size = 11)),
+                    tickformat = ".0%", len = 0.8, thickness = 12, outlinewidth = 0),
+    visible = (fl == "IMPORT")
+  )
+}
+p_heat <- p_heat %>%
+  layout(
+    xaxis = list(title = "HS2 chapter", type = "category", tickfont = list(size = 9), side = "bottom", dtick = 1),
+    yaxis = list(title = "", type = "category", autorange = "reversed", automargin = TRUE, tickfont = list(size = 10)),
+    margin = list(l = 10, r = 10, t = 10, b = 50)
+  ) %>%
+  theme_plotly()
+
+# ---------------------------------------------------------------------------------------------
+# 6. DATA TABLE - partner x product, imports / exports / balance (filter boxes + CSV export)
+# ---------------------------------------------------------------------------------------------
+table_data <- by_partner %>%
+  filter(PRODUCT_CODE != "TOTAL") %>%
+  select(PRODUCT_CODE, FLOW, PARTNER_CODE, PARTNER, VALUE) %>%
+  pivot_wider(names_from = FLOW, values_from = VALUE, values_fill = 0) %>%
+  left_join(select(products, PRODUCT_CODE, PRODUCT_NAME), by = "PRODUCT_CODE") %>%
+  mutate(BALANCE = EXPORT - IMPORT) %>%
+  arrange(PRODUCT_CODE, desc(IMPORT + EXPORT)) %>%
+  select(`HS2` = PRODUCT_CODE, Product = PRODUCT_NAME, Code = PARTNER_CODE, Partner = PARTNER,
+         `Imports (EUR)` = IMPORT, `Exports (EUR)` = EXPORT, `Balance (EUR)` = BALANCE)
+
+sd_table <- SharedData$new(table_data, key = ~Code, group = CT_GROUP)
+
+dt_table <- datatable(
+  sd_table, rownames = FALSE, filter = "top", extensions = "Buttons", style = "default", selection = "none",
+  class = "compact hover stripe", width = "100%",
+  options = list(
+    dom = "Bfrtip", pageLength = 15, buttons = list(list(extend = "csv", text = "Download CSV")),
+    order = list(list(4, "desc")),
+    columnDefs = list(list(className = "dt-right", targets = 4:6))
+  )
+) %>%
+  formatCurrency(5:7, currency = "", digits = 0, mark = " ") %>%
+  formatStyle(7, color = styleInterval(0, c(FLOW_COLORS[["IMPORT"]], FLOW_COLORS[["EXPORT"]])))
+```
+
+```{r cockpit}
+legend_item <- function(col, lbl) div(span(class = "swatch", style = paste0("background:", col, ";")), lbl)
+
+sidebar <- div(
+  class = "cockpit-side",
+  div(
+    class = "cockpit-brand",
+    div(class = "eyebrow", paste("Trade cockpit ·", params$year)),
+    div(class = "geo", params$reporter),
+    div(class = "sub", "Trade in goods with partner countries, by flow and HS2 chapter (Eurostat Comext, value in euros)")
+  ),
+  div(
+    tags$label(class = "control-label", "Flow"),
+    div(class = "pill-group", id = "flow_pills",
+        lapply(names(FLOW_COLORS), function(f)
+          tags$label(tags$input(type = "radio", name = "flow", value = f, checked = if (f == "IMPORT") NA else NULL),
+                     FLOW_LABELS[[f]])))
+  ),
+  div(
+    tags$label(class = "control-label", `for` = "product_select", "Product"),
+    tags$select(
+      id = "product_select", class = "form-select",
+      tags$option(value = "TOTAL", selected = NA, "All products"),
+      lapply(seq_len(nrow(products)), function(i) tags$option(value = products$PRODUCT_CODE[i], products$PRODUCT_OPT[i]))
+    ),
+    div(class = "hint", if (has_total) "All products = Eurostat TOTAL" else "All products = sum of the HS2 chapters")
+  ),
+  div(
+    class = "side-legend",
+    div(class = "control-label", "Legend"),
+    legend_item(FLOW_COLORS[["IMPORT"]], "Imports (into Luxembourg)"),
+    legend_item(FLOW_COLORS[["EXPORT"]], "Exports (from Luxembourg)"),
+    div("Map and heatmap: darker = larger value / share")
+  ),
+  div(
+    class = "side-footer",
+    sprintf("%d partner countries · %d HS2 chapters · generated %s", n_distinct(trade$PARTNER_CODE), nrow(products), format(Sys.Date(), "%d/%m/%Y")),
+    tags$details(
+      tags$summary(sprintf("%d non-country codes excluded", nrow(excluded_codes))),
+      lapply(seq_len(nrow(excluded_codes)), function(i)
+        div(tags$code(excluded_codes$PARTNER_CODE[i]), " ", excluded_codes$PARTNER_LABEL[i]))
+    )
+  )
+)
+
+main <- div(
+  class = "cockpit-main",
+  h2(class = "proc-title", id = "main-title", "Imports · All products"),
+  p(class = "proc-sub", id = "main-sub", ""),
+  div(
+    class = "kpi-row",
+    kpi("total", "Total value"),
+    kpi("partners", "Partner countries"),
+    kpi("top1", "Top partner"),
+    kpi("top5", "Top-5 partners share"),
+    kpi("balance", "Trade balance (product)")
+  ),
+  div(class = "card-box", div(class = "card-title", "World map"),
+      div(class = "card-sub", "Value traded with each partner country for the selected flow and product (log colour scale) · click a country to see its annual evolution below, double-click the map to clear"),
+      keyed(p_map, map_keys, "flow", 520)),
+  div(
+    class = "card-grid",
+    div(class = "card-box", div(class = "card-title", span("Annual evolution · ", span(id = "evo-partner", "–"))),
+        div(class = "card-sub", id = "evo-sub", sprintf("Imports and exports of the selected product, every year available (%d–%d) · click a country on the map", min(years_all), max(years_all))),
+        div(id = "evo-wrap", { p_evo$height <- 560; p_evo })),
+    div(class = "card-box", div(class = "card-title", sprintf("Top %d partners", params$top_n)),
+        div(class = "card-sub", "Selected flow and product · label = share of the flow"),
+        keyed(p_top, top_keys, "flow", 560))
+  ),
+  div(class = "card-box", div(class = "card-title", "Trade flows"),
+      div(class = "card-sub", sprintf("Selected product · where %s's imports come from (left) and where its exports go (right) · %d largest partners on each side, the rest grouped · hover a country to highlight its flows", params$reporter, SANKEY_N)),
+      keyed(p_sankey, sankey_keys, "product", 560)),
+  div(
+    class = "card-grid",
+    div(class = "card-box", div(class = "card-title", "Trade balance by partner"),
+        div(class = "card-sub", sprintf("Selected product · %d largest partners by imports + exports", params$top_n)),
+        keyed(p_bal, bal_keys, "product", 560)),
+    div(class = "card-box", div(class = "card-title", "Product mix"),
+        div(class = "card-sub", "HS2 chapters for the selected flow, all partners · label = share of the flow"),
+        keyed(p_mix, mix_keys, "flowonly", 560))
+  ),
+  div(class = "card-box", div(class = "card-title", "Partner × product"),
+      div(class = "card-sub", sprintf("Share of each HS2 chapter in the partner's flow · %d largest partners for the selected flow · hover a cell for the value", params$heat_n)),
+      keyed(p_heat, mix_keys, "flowonly", 720)),
+  div(class = "card-box", div(class = "card-title", "Data"),
+      div(class = "card-sub", "One row per partner country and HS2 chapter · follows the country clicked on the map (double-click the map to show every country) · filter boxes above each column"),
+      dt_table)
+)
+
+div(class = "cockpit", sidebar, main)
+```
+
+```{r kpi-json, results="asis"}
+cat("<script>window.TRADE_KPI = ", toJSON(kpi_json, auto_unbox = TRUE), ";",
+    "window.TRADE_PRODUCTS = ", toJSON(as.list(product_names), auto_unbox = TRUE), ";",
+    "window.TRADE_FLOWS = ", toJSON(as.list(FLOW_LABELS), auto_unbox = TRUE), ";",
+    "window.TRADE_PARTNERS = ", toJSON(as.list(setNames(partner_names$PARTNER, partner_names$PARTNER_CODE)), auto_unbox = TRUE), ";",
+    "window.TRADE_EVO_DEFAULT = ", toJSON(evo_default, auto_unbox = TRUE), ";",
+    "window.TRADE_GROUP = ", toJSON(CT_GROUP, auto_unbox = TRUE), ";",
+    "window.TRADE_ISO3 = ", toJSON(as.list(ISO_A3[partner_names$PARTNER_CODE]), auto_unbox = TRUE), ";",
+    "window.TRADE_TS = ", toJSON(ts_json, dataframe = "rows"), ";</script>\n", sep = "")
+```
+
+```{=html}
+<script>
+// Plotly sizes the legend with the font available when the chart is drawn. Poppins is loaded
+// from Google Fonts afterwards -> redraw once the fonts are ready.
+(function () {
+  function redraw() {
+    if (!window.Plotly) return;
+    document.querySelectorAll('.js-plotly-plot').forEach(function (gd) {
+      try { Plotly.relayout(gd, { 'font.family': gd._fullLayout.font.family }); } catch (e) {}
+    });
+  }
+  function schedule() { setTimeout(redraw, 150); }
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(schedule);
+  window.addEventListener('load', schedule);
+})();
+
+// Cockpit: the sidebar (flow pills + product select) switches the visible trace of every widget.
+// Each widget wrapper carries data-keys (one key per trace) and data-keyby:
+//   "flow"     -> key = product || flow
+//   "product"  -> key = product
+//   "flowonly" -> key = flow
+(function () {
+  var SEP = '||';
+
+  function selection() {
+    var f = document.querySelector('#flow_pills input:checked');
+    var p = document.getElementById('product_select');
+    return { flow: f ? f.value : 'IMPORT', product: p ? p.value : 'TOTAL' };
+  }
+
+  function keyFor(keyby, sel) {
+    if (keyby === 'product')  return sel.product;
+    if (keyby === 'flowonly') return sel.flow;
+    return sel.product + SEP + sel.flow;
+  }
+
+  function setText(id, txt) { var el = document.getElementById(id); if (el) el.textContent = txt; }
+
+  // ---- Annual evolution: partner from the crosstalk selection (click on the map) ------------
+  var TS = {};
+  (window.TRADE_TS || []).forEach(function (r) { TS[r.k] = r; });
+  var selectedPartner = window.TRADE_EVO_DEFAULT || null;
+
+  function updateEvolution(sel) {
+    sel = sel || selection();
+    var wrap = document.getElementById('evo-wrap');
+    var gd = wrap && wrap.querySelector('.js-plotly-plot');
+    if (!gd || !window.Plotly || !gd.data) return;
+    var pname = (window.TRADE_PRODUCTS || {})[sel.product] || sel.product;
+    var pn = selectedPartner ? ((window.TRADE_PARTNERS || {})[selectedPartner] || selectedPartner) : '–';
+    setText('evo-partner', pn + ' · ' + pname);
+    var xs = [], ys = [];
+    ['IMPORT', 'EXPORT'].forEach(function (f) {
+      var r = selectedPartner ? TS[selectedPartner + SEP + sel.product + SEP + f] : null;
+      xs.push(r ? r.y : []); ys.push(r ? r.v : []);
+    });
+    var names = ['IMPORT', 'EXPORT'].map(function (f) { return (window.TRADE_FLOWS || {})[f] || f; });
+    try { Plotly.restyle(gd, { x: xs, y: ys, name: names }, [0, 1]); } catch (e) {}
+  }
+
+  function mapWidget() {
+    var w = document.querySelector('.keyed'); return w && w.querySelector('.js-plotly-plot');
+  }
+
+  // Outline the selected country on the map (last trace of the map widget)
+  function highlightOnMap(code) {
+    var gd = mapWidget(); if (!gd || !gd.data) return;
+    var iso = code ? (window.TRADE_ISO3 || {})[code] : null;
+    try {
+      Plotly.restyle(gd, { locations: [iso ? [iso] : []], z: [iso ? [1] : []] }, [gd.data.length - 1]);
+    } catch (e) {}
+  }
+
+  // Crosstalk selection group shared by the map, the evolution chart and the data table
+  function bindCrosstalk() {
+    if (!window.crosstalk) return;
+    var sh = new crosstalk.SelectionHandle(window.TRADE_GROUP || 'partner');
+    sh.on('change', function (e) {
+      var v = e.value;
+      if (v && v.length) selectedPartner = v[v.length - 1];   // cleared selection -> keep the last partner
+      highlightOnMap(v && v.length ? selectedPartner : null);
+      updateEvolution();
+    });
+    var gd = mapWidget();
+    if (gd && gd.on) {
+      gd.on('plotly_click', function (e) {
+        var pt = e && e.points && e.points[0];
+        if (pt && pt.customdata) sh.set([pt.customdata]);
+      });
+      gd.on('plotly_doubleclick', function () { sh.clear(); });
+    }
+    // initial selection: highlights the country on the map and in the table
+    if (selectedPartner) { try { sh.set([selectedPartner]); } catch (e) {} }
+  }
+
+  function apply() {
+    var sel = selection();
+
+    // Widgets
+    document.querySelectorAll('.keyed').forEach(function (wrap) {
+      var gd = wrap.querySelector('.js-plotly-plot');
+      if (!gd || !window.Plotly || !gd.data) return;
+      var keys = JSON.parse(wrap.getAttribute('data-keys'));
+      var want = keyFor(wrap.getAttribute('data-keyby'), sel);
+      var vis = keys.map(function (k) { return k === want; });
+      if (vis.indexOf(true) === -1) vis = keys.map(function () { return false; });
+      // only the keyed traces: plotly/crosstalk appends its own highlight traces after them
+      var idx = keys.map(function (_, i) { return i; });
+      try { Plotly.restyle(gd, { visible: vis }, idx); } catch (e) {}
+    });
+
+    updateEvolution(sel);
+
+    // Titles + KPIs
+    var pname = (window.TRADE_PRODUCTS || {})[sel.product] || sel.product;
+    var fname = (window.TRADE_FLOWS || {})[sel.flow] || sel.flow;
+    setText('main-title', fname + ' · ' + pname);
+    setText('main-sub', sel.product === 'TOTAL' ? '' : 'HS2 chapter ' + sel.product);
+
+    var k = (window.TRADE_KPI || {})[sel.product + SEP + sel.flow] || {};
+    setText('kpi-total',    k.total_f    || '–');
+    setText('kpi-partners', k.partners   != null ? k.partners : '–');
+    setText('kpi-top1',     k.top1_f     || '–');
+    setText('kpi-top1-note',k.top1_note  || '');
+    setText('kpi-top5',     k.top5_f     || '–');
+    setText('kpi-balance',  k.balance_f  || '–');
+    setText('kpi-balance-note', k.balance_note || '');
+  }
+
+  function start() {
+    document.querySelectorAll('#flow_pills input').forEach(function (i) { i.addEventListener('change', apply); });
+    var p = document.getElementById('product_select');
+    if (p) p.addEventListener('change', apply);
+    // htmlwidgets draws plotly after 'load'; retry until the widgets expose their data
+    var tries = 0;
+    (function init() {
+      var ready = Array.prototype.every.call(document.querySelectorAll('.keyed'), function (w) {
+        var gd = w.querySelector('.js-plotly-plot'); return gd && gd.data;
+      });
+      if (!ready && tries++ < 100) { setTimeout(init, 100); return; }
+      apply();
+      bindCrosstalk();
+    })();
+  }
+
+  if (document.readyState === 'complete') setTimeout(start, 0);
+  else window.addEventListener('load', function () { setTimeout(start, 0); });
+})();
+</script>
+```

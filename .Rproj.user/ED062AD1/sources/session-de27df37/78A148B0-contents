@@ -1,0 +1,199 @@
+# =============================================================================
+# CausalImpact on the Luxembourg trade data (final_df) - test script
+#
+# CausalImpact (Google) estimates the causal effect of an intervention on a time
+# series: a Bayesian structural time-series model (bsts) is fitted on the
+# PRE-intervention period, using CONTROL series that were NOT affected by the
+# intervention, then it predicts what the treated series would have looked like
+# without the intervention (the counterfactual) and compares it with what was
+# actually observed. The difference = estimated effect, with a credible interval.
+#
+# Assumptions to keep in mind with this dataset:
+#   * the control series must be unaffected by the intervention (no spill-over)
+#     and their relation to the treated series must be stable over time;
+#   * the data are ANNUAL (one point per year): the pre-period must be long
+#     (>= 10 points, better 15) and the effects need to be large to be detected.
+#     Monthly Comext data would give far more power - the script is written so
+#     that a monthly final_df (TIME = "2019M03"...) could be plugged in later.
+#
+# Run step by step. Each case is a function call: run it, read the summary and
+# the report, look at the plot.
+# =============================================================================
+
+# ---- 0. Packages ---------------------------------------------------------------
+pkgs <- c("CausalImpact", "zoo", "dplyr", "tidyr", "ggplot2")
+manquants <- pkgs[!pkgs %in% rownames(installed.packages())]
+if (length(manquants) > 0) install.packages(manquants)   # CausalImpact pulls bsts, Boom, BoomSpikeSlab
+library(CausalImpact)
+library(zoo)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+# ---- 1. Data -------------------------------------------------------------------
+if (!exists("final_df")) final_df <- readRDS("final_df.rds")
+
+trade <- final_df %>%
+  transmute(PARTNER = ifelse(is.na(PARTNER_CODE), "NA", as.character(PARTNER_CODE)),
+            PRODUCT = as.character(PRODUCT_CODE),
+            FLOW    = toupper(FLOW_LABEL),
+            TIME    = as.integer(TIME),
+            VALUE   = as.numeric(VALUE_IN_EUROS)) %>%
+  filter(!is.na(VALUE))
+
+years_all <- sort(unique(trade$TIME))
+cat("Years available:", min(years_all), "-", max(years_all), "(", length(years_all), "points )\n")
+
+# ---- 2. Helpers ----------------------------------------------------------------
+# One annual series (zoo, Date index) for a partner (or a set of partners summed),
+# a product code ("TOTAL" = all products) and a flow. Missing years -> 0 (no trade).
+series <- function(partners, product = "TOTAL", flow = "EXPORT", log = FALSE) {
+  s <- trade %>%
+    filter(PARTNER %in% partners, PRODUCT == product, FLOW == flow) %>%
+    group_by(TIME) %>% summarise(VALUE = sum(VALUE), .groups = "drop") %>%
+    right_join(tibble(TIME = years_all), by = "TIME") %>%
+    arrange(TIME) %>% mutate(VALUE = replace_na(VALUE, 0))
+  v <- if (log) log1p(s$VALUE) else s$VALUE
+  zoo(v, order.by = as.Date(paste0(s$TIME, "-01-01")))
+}
+
+# Builds the CausalImpact data set: y = treated series, x1..xk = control series
+build_data <- function(y, controls) {
+  d <- do.call(merge, c(list(y = y), controls))
+  colnames(d) <- c("y", names(controls))
+  d
+}
+
+# Runs CausalImpact around an intervention year.
+#   event_year = first year AFFECTED by the intervention
+#   pre_start  = first year of the pre-period (default = first year available)
+#   post_end   = last year of the post-period (default = last year available)
+run_ci <- function(y, controls, event_year, pre_start = min(years_all), post_end = max(years_all),
+                   niter = 5000, nseasons = 1, title = "") {
+  d   <- build_data(y, controls)
+  pre <- as.Date(c(paste0(pre_start, "-01-01"), paste0(event_year - 1, "-01-01")))
+  post <- as.Date(c(paste0(event_year, "-01-01"), paste0(post_end, "-01-01")))
+  n_pre <- sum(index(d) >= pre[1] & index(d) <= pre[2])
+  if (n_pre < 8) warning(title, ": only ", n_pre, " pre-intervention points - the counterfactual will be very uncertain")
+  imp <- CausalImpact(d, pre.period = pre, post.period = post,
+                      model.args = list(niter = niter, nseasons = nseasons))
+  cat("\n==========", title, "==========\n")
+  print(summary(imp))
+  cat("\n")
+  print(summary(imp, "report"))
+  p <- plot(imp) + ggtitle(title)
+  print(p)
+  invisible(imp)
+}
+
+# Placebo: same model, but the "intervention" is placed on a year where nothing
+# happened. A significant effect there means the model finds effects by chance ->
+# be careful with the real result.
+placebo <- function(y, controls, fake_year, post_end, title = "") {
+  run_ci(y, controls, event_year = fake_year, post_end = post_end,
+         title = paste("PLACEBO", title, "- fake intervention in", fake_year))
+}
+
+# ---- 3. Case A - Brexit: exports of goods to the United Kingdom -------------------
+# Intervention: end of the transition period, 1 January 2021 (customs formalities,
+# rules of origin). Treated: exports LU -> UK (code GB in final_df, UK in other
+# extractions). Controls: exports to other non-EU advanced economies that did not
+# change their trade regime with Luxembourg in 2021.
+UK <- intersect(c("GB", "UK"), unique(trade$PARTNER))
+y_uk   <- series(UK, "TOTAL", "EXPORT")
+ctrl_a <- list(US = series("US", "TOTAL", "EXPORT"),
+               CH = series("CH", "TOTAL", "EXPORT"),
+               NO = series("NO", "TOTAL", "EXPORT"),
+               JP = series("JP", "TOTAL", "EXPORT"),
+               CA = series("CA", "TOTAL", "EXPORT"))
+imp_a <- run_ci(y_uk, ctrl_a, event_year = 2021, title = "A. Brexit - exports to the UK")
+# Same on imports from the UK
+imp_a2 <- run_ci(series(UK, "TOTAL", "IMPORT"),
+                 lapply(list(US = "US", CH = "CH", NO = "NO", JP = "JP", CA = "CA"), series, product = "TOTAL", flow = "IMPORT"),
+                 event_year = 2021, title = "A2. Brexit - imports from the UK")
+# Placebo on the same series, intervention pretended in 2015 (post-period stopped before 2020)
+placebo(y_uk, ctrl_a, fake_year = 2015, post_end = 2019, title = "A. Brexit")
+
+# ---- 4. Case B - US tariffs on steel and aluminium (Section 232, June 2018) -------
+# Treated: exports of chapter 72 (iron and steel) to the United States.
+# Controls: exports of chapter 72 to other partners (same product, other markets).
+y_us72 <- series("US", "72", "EXPORT")
+ctrl_b <- list(CH = series("CH", "72", "EXPORT"),
+               GB = series(UK,   "72", "EXPORT"),
+               TR = series("TR", "72", "EXPORT"),
+               CA = series("CA", "72", "EXPORT"),
+               JP = series("JP", "72", "EXPORT"))
+imp_b <- run_ci(y_us72, ctrl_b, event_year = 2018, post_end = 2019,   # stop before COVID
+                title = "B. US steel tariffs - exports of chapter 72 to the US (2018-2019)")
+# Same with aluminium (76)
+imp_b2 <- run_ci(series("US", "76", "EXPORT"),
+                 lapply(list(CH = "CH", GB = UK, TR = "TR", CA = "CA", JP = "JP"), series, product = "76", flow = "EXPORT"),
+                 event_year = 2018, post_end = 2019, title = "B2. US aluminium tariffs - exports of chapter 76 to the US")
+
+# ---- 5. Case C - Sanctions on Russia (from 2022) -----------------------------------
+# Treated: exports to Russia (all products). Controls: exports to other non-EU
+# partners outside the sanctions regime. Pre-period starts in 2010 to stay after the
+# 2009 crisis; note that 2014 (first sanctions) is inside the pre-period.
+y_ru   <- series("RU", "TOTAL", "EXPORT")
+ctrl_c <- list(TR = series("TR", "TOTAL", "EXPORT"),
+               CN = series("CN", "TOTAL", "EXPORT"),
+               IN = series("IN", "TOTAL", "EXPORT"),
+               BR = series("BR", "TOTAL", "EXPORT"),
+               ZA = series("ZA", "TOTAL", "EXPORT"))
+imp_c <- run_ci(y_ru, ctrl_c, event_year = 2022, pre_start = 2010, title = "C. Russia sanctions - exports to Russia")
+imp_c2 <- run_ci(series("RU", "TOTAL", "IMPORT"),
+                 lapply(list(TR = "TR", CN = "CN", IN = "IN", BR = "BR", ZA = "ZA"), series, product = "TOTAL", flow = "IMPORT"),
+                 event_year = 2022, pre_start = 2010, title = "C2. Russia sanctions - imports from Russia")
+
+# ---- 6. Case D - COVID-19 (2020): what did Luxembourg lose with its neighbours? ----
+# No partner is a clean control for a global shock, so the counterfactual relies on
+# the chapters that kept growing in 2020. Treated: imports of chapter 87 (vehicles)
+# from BE+FR+NL+DE. Controls: imports of chapters 30 (pharmaceuticals) and 85
+# (electrical equipment) from the same countries. Post-period = 2020 only; the
+# question is "what would 2020 have been without the shock".
+NB <- c("BE", "FR", "NL", "DE")
+imp_d <- run_ci(series(NB, "87", "IMPORT"),
+                list(pharma = series(NB, "30", "IMPORT"), elec = series(NB, "85", "IMPORT"), food = series(NB, "21", "IMPORT")),
+                event_year = 2020, post_end = 2020, title = "D. COVID-19 - imports of vehicles (87) from the neighbours, 2020")
+
+# ---- 7. Case E - EU-Japan Economic Partnership Agreement (in force Feb 2019) -------
+# Treated: exports to Japan. Controls: exports to other Asian / Pacific economies
+# without a new agreement in 2019 (KR has had one since 2011, so it is a control).
+imp_e <- run_ci(series("JP", "TOTAL", "EXPORT"),
+                list(KR = series("KR", "TOTAL", "EXPORT"), CN = series("CN", "TOTAL", "EXPORT"),
+                     TW = series("TW", "TOTAL", "EXPORT"), AU = series("AU", "TOTAL", "EXPORT")),
+                event_year = 2019, post_end = 2019, title = "E. EU-Japan EPA - exports to Japan, 2019 only")
+
+# ---- 8. Case F - the same question on log values ----------------------------------
+# Log series make the model work on growth rates rather than levels: often better
+# when the treated and the control series have very different sizes. The effect is
+# then read as a relative effect (exp(effect) - 1).
+imp_f <- run_ci(series(UK, "TOTAL", "EXPORT", log = TRUE),
+                lapply(list(US = "US", CH = "CH", NO = "NO", JP = "JP", CA = "CA"), series, product = "TOTAL", flow = "EXPORT", log = TRUE),
+                event_year = 2021, title = "F. Brexit on log exports to the UK")
+cat("\nRelative effect (log model):", sprintf("%.1f%%", 100 * (exp(imp_f$summary$AbsEffect[1]) - 1)), "\n")
+
+# ---- 9. Screening: which partners changed the most after a given year? ------------
+# Runs a quick CausalImpact for every large partner with the same event year and
+# the same pool of controls (minus the partner itself). Returns a ranking of the
+# relative effects. Use it to find candidates, then analyse them one by one.
+screen_partners <- function(event_year, flow = "EXPORT", product = "TOTAL",
+                            pool = c("US", "CH", "NO", "JP", "CA", "KR", "CN", "TR", "IN", "BR"),
+                            min_value = 50e6, niter = 1000) {
+  big <- trade %>% filter(PRODUCT == product, FLOW == flow, TIME == event_year - 1, PARTNER %in% pool, VALUE >= min_value) %>% pull(PARTNER)
+  res <- lapply(big, function(p) {
+    y <- series(p, product, flow)
+    ctrl <- lapply(setNames(setdiff(pool, p), setdiff(pool, p)), series, product = product, flow = flow)
+    d <- build_data(y, ctrl)
+    imp <- tryCatch(CausalImpact(d, as.Date(c(paste0(min(years_all), "-01-01"), paste0(event_year - 1, "-01-01"))),
+                                 as.Date(c(paste0(event_year, "-01-01"), paste0(max(years_all), "-01-01"))),
+                                 model.args = list(niter = niter)), error = function(e) NULL)
+    if (is.null(imp)) return(NULL)
+    s <- imp$summary
+    tibble(PARTNER = p, actual = s$Actual[1], predicted = s$Pred[1],
+           rel_effect = s$RelEffect[1], rel_lower = s$RelEffect.lower[1], rel_upper = s$RelEffect.upper[1], p_value = s$p[1])
+  })
+  bind_rows(res) %>% arrange(p_value)
+}
+screen_2021 <- screen_partners(2021)
+print(screen_2021)

@@ -1,8 +1,0 @@
-# Python side. R dependencies: see environment.yml and r/README.md
-streamlit>=1.50
-pandas>=2.2
-numpy>=1.26
-plotly>=5.24
-pyarrow>=17
-requests>=2.32
-pytest>=8

@@ -1,0 +1,132 @@
+# =============================================================================
+# Consolidation d'un export Eurostat (ds-045409 - EU trade since 1988 by HS2-4-6)
+# Fichier source : un onglet "Summary" + un onglet "Sheet N" par PRODUCT x FLOW
+# Résultat      : data.frame "dataset" en mémoire (1 ligne = produit x flux x partenaire x année)
+# =============================================================================
+
+# ---- 0. Packages -------------------------------------------------------------
+pkgs <- c("readxl", "dplyr", "tidyr", "stringr", "purrr")
+manquants <- pkgs[!pkgs %in% rownames(installed.packages())]
+if (length(manquants) > 0) install.packages(manquants)
+invisible(lapply(pkgs, library, character.only = TRUE))
+
+# ---- 1. Paramètres -----------------------------------------------------------
+fichier_in <- "M:/Knowledge/TF Innovation/Hackhathon 2026/Trade_Hackathon_2026/2_digits_2015-2025_LU.xlsx"
+
+# ---- 2. Fonctions utilitaires ------------------------------------------------
+# "LIVE ANIMALS [01]" -> code "01" ; libellé "LIVE ANIMALS"
+extraire_code    <- function(x) str_match(x, "\\[([^\\[\\]]*)\\]\\s*$")[, 2]
+extraire_libelle <- function(x) str_trim(str_remove(x, "\\s*\\[[^\\[\\]]*\\]\\s*$"))
+
+# Valeur de métadonnée dans l'en-tête d'un onglet (ex. "PRODUCT [PRODUCT]")
+valeur_meta <- function(raw, cle) {
+  i <- which(raw[[1]] == cle)
+  if (length(i) == 0) return(NA_character_)
+  # la valeur est dans la 1re cellule non vide à droite (cellules fusionnées)
+  v <- unlist(raw[i[1], -1], use.names = FALSE)
+  v <- v[!is.na(v) & v != ""]
+  if (length(v) == 0) NA_character_ else v[1]
+}
+
+# Lecture d'un onglet de données -> format long
+lire_onglet <- function(nom_onglet) {
+  raw <- read_excel(fichier_in, sheet = nom_onglet, col_names = FALSE,
+                    col_types = "text", .name_repair = "minimal")
+  names(raw) <- paste0("c", seq_along(raw))
+  
+  # Métadonnées présentes en tête de chaque onglet
+  freq      <- valeur_meta(raw, "Frequency [FREQ]")
+  reporter  <- valeur_meta(raw, "REPORTER [REPORTER]")
+  product   <- valeur_meta(raw, "PRODUCT [PRODUCT]")
+  flow      <- valeur_meta(raw, "FLOW [FLOW]")
+  indicator <- valeur_meta(raw, "INDICATORS [INDICATORS]")
+  
+  # Ligne "TIME" = années ; données à partir de la ligne après "PARTNER (Codes)"
+  i_time  <- which(raw$c1 == "TIME")[1]
+  i_part  <- which(raw$c1 == "PARTNER (Codes)")[1]
+  if (is.na(i_time) || is.na(i_part)) {
+    warning("Structure inattendue dans l'onglet ", nom_onglet, " : ignoré")
+    return(NULL)
+  }
+  annees  <- unlist(raw[i_time, -(1:2)], use.names = FALSE)
+  col_ok  <- which(!is.na(annees) & annees != "") + 2
+  
+  # Fin du bloc : première ligne vide après le début des données
+  debut <- i_part + 1
+  vides <- which(is.na(raw$c1) & seq_len(nrow(raw)) > debut)
+  fin   <- if (length(vides) > 0) vides[1] - 1 else nrow(raw)
+  
+  bloc <- raw[debut:fin, c(1, 2, col_ok)]
+  names(bloc) <- c("PARTNER_CODE", "PARTNER_LABEL", annees[col_ok - 2])
+  
+  bloc |>
+    pivot_longer(-c(PARTNER_CODE, PARTNER_LABEL),
+                 names_to = "TIME", values_to = "VALUE_RAW") |>
+    mutate(
+      SHEET           = nom_onglet,
+      FREQ_CODE       = extraire_code(freq),
+      REPORTER_CODE   = extraire_code(reporter),
+      REPORTER_LABEL  = extraire_libelle(reporter),
+      PRODUCT_CODE    = extraire_code(product),
+      PRODUCT_LABEL   = extraire_libelle(product),
+      FLOW_CODE       = extraire_code(flow),
+      FLOW_LABEL      = extraire_libelle(flow),
+      INDICATOR_CODE  = extraire_code(indicator),
+      TIME            = as.integer(TIME),
+      # ":" = not available (valeur spéciale Eurostat) -> NA
+      VALUE_IN_EUROS  = suppressWarnings(as.numeric(na_if(str_trim(VALUE_RAW), ":")))
+    )
+}
+
+# ---- 3. Lecture du Summary (table de contrôle) ------------------------------
+summary_raw <- read_excel(fichier_in, sheet = "Summary", col_names = FALSE,
+                          col_types = "text", .name_repair = "minimal")
+names(summary_raw) <- paste0("c", seq_along(summary_raw))
+i_head <- which(summary_raw$c2 == "Contents")[1]
+
+summary_tbl <- summary_raw[(i_head + 1):nrow(summary_raw), ] |>
+  filter(str_detect(c2, "^Sheet \\d+$")) |>
+  transmute(SHEET            = c2,
+            PRODUCT_CODE_SUM = extraire_code(c5),
+            FLOW_CODE_SUM    = extraire_code(c6))
+
+cat("Onglets listés dans le Summary :", nrow(summary_tbl), "\n")
+
+# ---- 4. Consolidation de tous les onglets -----------------------------------
+onglets <- setdiff(excel_sheets(fichier_in), "Summary")
+cat("Onglets de données trouvés     :", length(onglets), "\n")
+
+consolide <- map(onglets, \(s) { message("Lecture : ", s); lire_onglet(s) }) |>
+  list_rbind()
+
+# ---- 5. Contrôles de cohérence avec le Summary ------------------------------
+controle <- consolide |>
+  distinct(SHEET, PRODUCT_CODE, FLOW_CODE) |>
+  full_join(summary_tbl, by = "SHEET") |>
+  filter(is.na(PRODUCT_CODE) | is.na(PRODUCT_CODE_SUM) |
+           PRODUCT_CODE != PRODUCT_CODE_SUM | FLOW_CODE != FLOW_CODE_SUM)
+if (nrow(controle) > 0) {
+  warning("Incohérences entre onglets et Summary :")
+  print(controle)
+} else {
+  cat("Contrôle Summary vs onglets    : OK\n")
+}
+
+doublons <- consolide |>
+  count(PRODUCT_CODE, FLOW_CODE, PARTNER_CODE, TIME) |>
+  filter(n > 1)
+cat("Doublons de clé                :", nrow(doublons), "\n")
+
+# ---- 6. Mise en forme finale ------------------------------------------------
+dataset <- consolide |>
+  select(FREQ_CODE, REPORTER_CODE, REPORTER_LABEL,
+         PRODUCT_CODE, PRODUCT_LABEL, FLOW_CODE, FLOW_LABEL,
+         PARTNER_CODE, PARTNER_LABEL, TIME, INDICATOR_CODE,
+         VALUE_IN_EUROS, SHEET) |>
+  arrange(PRODUCT_CODE, FLOW_CODE, PARTNER_CODE, TIME)
+
+dataset <- as.data.frame(dataset)
+
+dataset_2015_2025 <- dataset %>%
+  filter(!is.na(VALUE_IN_EUROS))
+

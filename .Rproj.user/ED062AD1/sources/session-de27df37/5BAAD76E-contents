@@ -1,0 +1,236 @@
+---
+title: "Trade flows map – `r params$reporter` – `r params$year`"
+date: "`r format(Sys.Date(), '%d/%m/%Y')`"
+output:
+  html_document:
+    self_contained: true
+    toc: false
+    theme:
+      version: 5
+      bg: "#EEF9FD"
+      fg: "#271D67"
+      primary: "#1AADE7"
+      secondary: "#271D67"
+      base_font: !expr bslib::font_collection(bslib::font_google("Poppins", local = FALSE), "Segoe UI", "Arial", "sans-serif")
+      heading_font: !expr bslib::font_collection(bslib::font_google("Poppins", local = FALSE), "Segoe UI", "Arial", "sans-serif")
+params:
+  reporter: "Luxembourg"
+  reporter_code: "LU"
+  year: 2025
+  partners: ["BE", "FR", "NL", "DE"]   # partner codes drawn on the map (any country with coordinates below)
+  product: "TOTAL"                     # HS2 chapter code, or TOTAL = all products
+  data_path: "final_df.rds"            # used when final_df is not in memory
+  topojson_url: ""                     # optional local folder with plotly's world_110m.json (offline map)
+  max_width: 22                        # width in px of the largest flow
+---
+
+<!--
+A map of the trade flows between the reporter and a set of partners: one curved arrow per flow,
+imports (partner -> reporter) in blue, exports (reporter -> partner) in orange, width proportional
+to the value, label = value and share of the reporter's world total. Hover an arrow for the details.
+Usage: rmarkdown::render("flow_map_LU.Rmd", envir = globalenv()) with final_df in memory, or Knit with
+final_df.rds next to the file. Change params$partners to draw other countries (e.g. the top 10).
+The base map is fetched from cdn.plot.ly when the page opens, unless params$topojson_url is set.
+-->
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+need <- c("tidyverse", "plotly", "htmltools", "bslib")
+missing_pkgs <- need[!need %in% installed.packages()[, "Package"]]
+if (length(missing_pkgs) > 0) install.packages(missing_pkgs)
+library(tidyverse); library(plotly); library(htmltools)
+
+COL_NAVY <- "#271D67"; COL_BLUE <- "#1AADE7"; COL_GREY <- "#8A87A8"
+FONT_FAMILY <- "Poppins, 'Segoe UI', Arial, sans-serif"
+FLOW_COLORS <- c(IMPORT = "#0E8FC2", EXPORT = "#D97A06")
+FLOW_LABELS <- c(IMPORT = "Imports", EXPORT = "Exports")
+fmt_eur <- function(x) case_when(is.na(x) ~ "–", abs(x) >= 1e9 ~ sprintf("%.2f bn €", x / 1e9), abs(x) >= 1e6 ~ sprintf("%.1f M€", x / 1e6),
+                                 abs(x) >= 1e3 ~ sprintf("%.0f k€", x / 1e3), TRUE ~ sprintf("%.0f €", x))
+fmt_pct <- function(x) ifelse(is.na(x), "–", sprintf("%.1f%%", 100 * x))
+rgba <- function(hex, a) { r <- col2rgb(hex); sprintf("rgba(%d,%d,%d,%.2f)", r[1], r[2], r[3], a) }
+
+# Approximate centroids (lon, lat) of the countries that can be drawn. Add a line to draw another one.
+COORDS <- tribble(
+  ~CODE, ~LON, ~LAT,
+  "LU",  6.13, 49.61, "BE",  4.47, 50.64, "FR",  2.21, 46.60, "NL",  5.29, 52.13, "DE", 10.45, 51.16,
+  "AT", 14.55, 47.52, "CH",  8.23, 46.82, "IT", 12.57, 42.50, "ES", -3.75, 40.46, "PT", -8.22, 39.40,
+  "GB", -2.00, 53.50, "UK", -2.00, 53.50, "IE", -8.24, 53.41, "DK",  9.50, 56.26, "SE", 15.00, 60.00,
+  "NO",  9.00, 61.50, "FI", 26.00, 63.00, "PL", 19.15, 51.92, "CZ", 15.47, 49.82, "SK", 19.70, 48.67,
+  "HU", 19.50, 47.16, "SI", 14.99, 46.15, "HR", 15.98, 45.10, "RO", 24.97, 45.94, "BG", 25.49, 42.73,
+  "GR", 21.82, 39.07, "EL", 21.82, 39.07, "TR", 35.24, 38.96, "EE", 25.01, 58.60, "LV", 24.60, 56.88,
+  "LT", 23.88, 55.17, "UA", 31.17, 48.38, "RU", 60.00, 58.00, "CY", 33.43, 35.13, "MT", 14.38, 35.94,
+  "IS", -19.0, 65.00, "US", -98.6, 39.80, "CA", -98.0, 58.00, "MX", -102.6, 23.63, "BR", -51.9, -10.8,
+  "AR", -64.0, -35.0, "CN", 104.2, 35.86, "JP", 138.3, 36.20, "KR", 127.8, 36.00, "IN",  78.96, 20.59,
+  "AU", 133.8, -25.3, "ZA",  24.00, -29.0, "AE",  54.00, 24.00, "SA",  45.00, 24.00, "IL",  34.85, 31.05,
+  "EG",  30.00, 26.80, "MA", -6.00, 32.00, "SG", 103.8,  1.35, "TW", 121.0, 23.70, "HK", 114.2, 22.40,
+  "VN", 108.0, 14.00, "TH", 100.9, 15.87, "MY", 101.9,  4.21, "ID", 113.9, -0.79, "QA",  51.18, 25.35,
+  "KZ",  66.92, 48.02, "RS", 21.00, 44.00, "XS", 21.00, 44.00, "BA", 17.68, 43.92, "MD", 28.37, 47.41,
+  "BY",  27.95, 53.71, "GE", 43.36, 42.32, "NG",   8.00,  9.08, "CL", -71.5, -35.7, "CO", -74.3,  4.57
+)
+```
+
+```{=html}
+<style>
+body { background: #EEF9FD; }
+.main-container { max-width: 1300px; }
+h1.title { color: #271D67; font-weight: 700; font-size: 1.7em; }
+.card-box { background: #FFFFFF; border-radius: 10px; padding: 14px 16px; margin: 14px 0; box-shadow: 0 1px 3px rgba(39,29,103,.08); }
+.card-title { font-size: 0.85em; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: #1AADE7; margin: 0 0 2px 0; }
+.card-sub { font-size: 0.8em; color: #4A4380; margin: 0 0 10px 0; }
+.kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin: 14px 0; }
+.kpi { background: #FFFFFF; border-radius: 10px; padding: 12px 16px; border-left: 4px solid #1AADE7; box-shadow: 0 1px 3px rgba(39,29,103,.08); }
+.kpi-value { font-size: 1.5em; font-weight: 700; color: #271D67; line-height: 1.2; }
+.kpi-label { font-size: 0.75em; color: #4A4380; text-transform: uppercase; letter-spacing: .05em; }
+.kpi-note  { font-size: 0.75em; color: #8A87A8; }
+table { font-size: 0.9em; }
+</style>
+```
+
+```{r data}
+if (exists("final_df", envir = globalenv(), inherits = FALSE)) {
+  final_df <- get("final_df", envir = globalenv())
+} else if (nzchar(params$data_path) && file.exists(params$data_path)) {
+  final_df <- readRDS(params$data_path)
+} else stop("final_df not found: run saveRDS(final_df, \"final_df.rds\") or render with envir = globalenv()")
+
+yr <- params$year; PARTNERS <- unlist(params$partners); PROD <- params$product
+raw <- final_df %>%
+  transmute(PARTNER = ifelse(is.na(PARTNER_CODE), "NA", as.character(PARTNER_CODE)), PARTNER_LABEL, PRODUCT = as.character(PRODUCT_CODE),
+            PRODUCT_LABEL, FLOW = toupper(FLOW_LABEL), TIME = as.integer(TIME), VALUE = as.numeric(VALUE_IN_EUROS)) %>%
+  filter(!is.na(VALUE), TIME == yr, FLOW %in% names(FLOW_COLORS))
+
+# Chapter: TOTAL when present, else the sum of the chapters
+prod_rows <- function(d) if (PROD == "TOTAL" && !"TOTAL" %in% d$PRODUCT) d %>% filter(!PRODUCT %in% c("TOTAL")) %>%
+  group_by(PARTNER, PARTNER_LABEL, FLOW) %>% summarise(VALUE = sum(VALUE), .groups = "drop") else d %>% filter(PRODUCT == PROD) %>% select(PARTNER, PARTNER_LABEL, FLOW, VALUE)
+prod_name <- if (PROD == "TOTAL") "All products" else str_to_sentence(raw$PRODUCT_LABEL[raw$PRODUCT == PROD][1])
+
+# World totals = Eurostat WORLD when present, else the sum of the partner countries
+is_country <- function(code) str_detect(code, "^[A-Z]{2}$") & !str_detect(code, "^Q")
+world <- prod_rows(raw %>% filter(PARTNER == "WORLD"))
+tot <- if (nrow(world) > 0) world %>% group_by(FLOW) %>% summarise(TOTAL = sum(VALUE), .groups = "drop") else
+  prod_rows(raw %>% filter(is_country(PARTNER))) %>% group_by(FLOW) %>% summarise(TOTAL = sum(VALUE), .groups = "drop")
+tot_of <- function(fl) { v <- tot$TOTAL[tot$FLOW == fl]; if (length(v)) v else NA_real_ }
+
+flows <- prod_rows(raw %>% filter(PARTNER %in% PARTNERS)) %>%
+  group_by(PARTNER, FLOW) %>% summarise(VALUE = sum(VALUE), NAME = str_squish(str_remove(first(PARTNER_LABEL), "\\s*\\(.*$")), .groups = "drop") %>%
+  mutate(SHARE = VALUE / if_else(FLOW == "IMPORT", tot_of("IMPORT"), tot_of("EXPORT"))) %>%
+  left_join(COORDS, by = c("PARTNER" = "CODE"))
+missing_coords <- unique(flows$PARTNER[is.na(flows$LON)])
+if (length(missing_coords)) warning("No coordinates for: ", paste(missing_coords, collapse = ", "), " - add them to COORDS")
+flows <- flows %>% filter(!is.na(LON))
+LU <- COORDS %>% filter(CODE == params$reporter_code)
+```
+
+```{r arrows}
+# ---- Geometry of the arrows -----------------------------------------------------------------------
+# Work in a locally flat frame (x = lon * cos(lat0), y = lat) so that offsets and arrowheads keep
+# their shape, then convert back to lon / lat for scattergeo. Each flow is a quadratic Bézier curve
+# bent to one side of the straight line (imports on one side, exports on the other) so that the two
+# directions never overlap; the arrowhead is a small filled triangle at the end of the curve.
+lat0 <- LU$LAT; kx <- cos(lat0 * pi / 180)
+to_xy <- function(lon, lat) cbind(x = lon * kx, y = lat)
+to_ll <- function(xy) cbind(LON = xy[, 1] / kx, LAT = xy[, 2])
+
+bezier <- function(p0, p1, side, n = 40, bend = 0.22) {
+  v <- p1 - p0; L <- sqrt(sum(v^2)); nrm <- c(-v[2], v[1]) / L          # unit normal
+  c0 <- (p0 + p1) / 2 + side * bend * L * nrm                            # control point
+  t <- seq(0, 1, length.out = n)
+  pts <- cbind((1 - t)^2 * p0[1] + 2 * (1 - t) * t * c0[1] + t^2 * p1[1],
+               (1 - t)^2 * p0[2] + 2 * (1 - t) * t * c0[2] + t^2 * p1[2])
+  list(pts = pts, L = L, nrm = nrm * side, at = function(u) pts[max(1, round(u * n)), ])
+}
+arrow_head <- function(pts, size) {
+  tip <- pts[nrow(pts), ]; prev <- pts[nrow(pts) - 2, ]
+  d <- tip - prev; d <- d / sqrt(sum(d^2)); nrm <- c(-d[2], d[1])
+  base <- tip - d * size
+  tri <- rbind(tip, base + nrm * size * 0.55, base - nrm * size * 0.55)
+  # plotly draws geo polygons with d3-geo: the ring must run clockwise (lon east, lat north),
+  # otherwise the fill covers the whole sphere except the triangle
+  area <- sum(tri[, 1] * c(tri[-1, 2], tri[1, 2]) - c(tri[-1, 1], tri[1, 1]) * tri[, 2]) / 2
+  if (area > 0) tri <- tri[3:1, ]
+  rbind(tri, tri[1, ])
+}
+
+vmax <- max(flows$VALUE)
+width_of <- function(v) 2 + (params$max_width - 2) * sqrt(v / vmax)        # px, sqrt so small flows stay visible
+head_of  <- function(v) 0.12 + 0.32 * sqrt(v / vmax)                          # in degrees of latitude (map units)
+
+p <- plot_geo()
+labels <- list()
+for (i in seq_len(nrow(flows))) {
+  f <- flows[i, ]
+  P <- to_xy(f$LON, f$LAT)[1, ]; R <- to_xy(LU$LON, LU$LAT)[1, ]
+  # imports run partner -> reporter, exports reporter -> partner; opposite sides of the line
+  if (f$FLOW == "IMPORT") { b <- bezier(P, R, side = +1) } else { b <- bezier(R, P, side = +1) }
+  # shorten the curve so the head does not sit on the marker
+  pts <- b$pts[1:(nrow(b$pts) - 2), ]
+  ll <- to_ll(pts); hd <- to_ll(arrow_head(pts, head_of(f$VALUE)))
+  col <- FLOW_COLORS[[f$FLOW]]
+  hover <- sprintf("<b>%s</b> · %s<br>%s: %s<br>%s of %s's total %s", f$NAME, prod_name, FLOW_LABELS[[f$FLOW]], fmt_eur(f$VALUE), fmt_pct(f$SHARE), params$reporter, tolower(FLOW_LABELS[[f$FLOW]]))
+  p <- p %>%
+    add_trace(type = "scattergeo", mode = "lines", lon = ll[, "LON"], lat = ll[, "LAT"],
+              line = list(color = rgba(col, 0.75), width = width_of(f$VALUE)), hoverinfo = "text", text = hover,
+              name = paste(f$NAME, FLOW_LABELS[[f$FLOW]]), showlegend = FALSE) %>%
+    add_trace(type = "scattergeo", mode = "lines", lon = hd[, "LON"], lat = hd[, "LAT"], fill = "toself", fillcolor = col,
+              line = list(color = col, width = 1), hoverinfo = "skip", showlegend = FALSE)
+  # label near the partner end (60 % of the way from the reporter), pushed outward on the curve's own side
+  lab_xy <- (if (f$FLOW == "IMPORT") b$at(0.38) else b$at(0.62)) + b$nrm * (0.10 * b$L + 0.45)
+  mid <- to_ll(matrix(lab_xy, nrow = 1))
+  labels[[i]] <- tibble(LON = mid[1, "LON"], LAT = mid[1, "LAT"], TXT = sprintf("%s · %s", fmt_eur(f$VALUE), fmt_pct(f$SHARE)), COL = col)
+}
+labels <- bind_rows(labels)
+
+# Partner and reporter markers
+pts_p <- flows %>% distinct(PARTNER, NAME, LON, LAT)
+p <- p %>%
+  add_trace(type = "scattergeo", mode = "markers+text", data = pts_p, lon = ~LON, lat = ~LAT, text = ~NAME, textposition = "bottom center",
+            textfont = list(size = 12, color = COL_NAVY, family = FONT_FAMILY),
+            marker = list(size = 10, color = "#FFFFFF", line = list(color = COL_NAVY, width = 2)), hoverinfo = "text", hovertext = ~NAME, showlegend = FALSE) %>%
+  add_trace(type = "scattergeo", mode = "markers+text", lon = LU$LON, lat = LU$LAT, text = params$reporter, textposition = "top center",
+            textfont = list(size = 13, color = COL_NAVY, family = FONT_FAMILY),
+            marker = list(size = 14, color = COL_NAVY, line = list(color = "#FFFFFF", width = 2)), hoverinfo = "text",
+            hovertext = sprintf("<b>%s</b><br>%s<br>Imports: %s · Exports: %s", params$reporter, prod_name, fmt_eur(tot_of("IMPORT")), fmt_eur(tot_of("EXPORT"))), showlegend = FALSE) %>%
+  add_trace(type = "scattergeo", mode = "text", data = labels, lon = ~LON, lat = ~LAT, text = ~TXT, textfont = list(size = 11, color = ~COL, family = FONT_FAMILY),
+            hoverinfo = "skip", showlegend = FALSE) %>%
+  # legend entries
+  add_trace(type = "scattergeo", mode = "lines", lon = c(NA, NA), lat = c(NA, NA), line = list(color = FLOW_COLORS[["IMPORT"]], width = 6), name = sprintf("Imports (into %s)", params$reporter)) %>%
+  add_trace(type = "scattergeo", mode = "lines", lon = c(NA, NA), lat = c(NA, NA), line = list(color = FLOW_COLORS[["EXPORT"]], width = 6), name = sprintf("Exports (from %s)", params$reporter))
+
+# Map window around the points drawn
+lon_r <- range(c(flows$LON, LU$LON)); lat_r <- range(c(flows$LAT, LU$LAT))
+pad_lon <- max(4.5, diff(lon_r) * 0.55); pad_lat <- max(1.2, diff(lat_r) * 0.18)   # wide window: room for the labels
+p <- p %>%
+  layout(
+    geo = list(projection = list(type = "mercator"), showframe = FALSE, showcoastlines = TRUE, coastlinecolor = "#C9C4EC",
+               showcountries = TRUE, countrycolor = "#C9C4EC", landcolor = "#EDF0F7", showocean = TRUE, oceancolor = "#FFFFFF",
+               showlakes = FALSE, bgcolor = "rgba(0,0,0,0)", resolution = 50,
+               lonaxis = list(range = lon_r + c(-pad_lon, pad_lon)), lataxis = list(range = lat_r + c(-pad_lat, pad_lat))),
+    legend = list(orientation = "h", x = 0.5, xanchor = "center", y = -0.02, font = list(size = 12)),
+    font = list(family = FONT_FAMILY, color = COL_NAVY), paper_bgcolor = "rgba(0,0,0,0)", hoverlabel = list(font = list(family = FONT_FAMILY)),
+    margin = list(l = 0, r = 0, t = 10, b = 40)
+  ) %>%
+  config(displaylogo = FALSE, modeBarButtonsToRemove = c("lasso2d", "select2d"),
+         topojsonURL = if (nzchar(params$topojson_url)) params$topojson_url else NULL)
+p$height <- 600
+```
+
+```{r page}
+kpi <- function(value, label, note = "") div(class = "kpi", div(class = "kpi-value", value), div(class = "kpi-label", label), div(class = "kpi-note", note))
+imp_p <- sum(flows$VALUE[flows$FLOW == "IMPORT"]); exp_p <- sum(flows$VALUE[flows$FLOW == "EXPORT"])
+div(class = "kpi-row",
+    kpi(fmt_eur(imp_p), sprintf("Imports from the %d partners", nrow(pts_p)), paste0(fmt_pct(imp_p / tot_of("IMPORT")), " of total imports")),
+    kpi(fmt_eur(exp_p), sprintf("Exports to the %d partners", nrow(pts_p)), paste0(fmt_pct(exp_p / tot_of("EXPORT")), " of total exports")),
+    kpi(paste0(if_else(exp_p - imp_p >= 0, "+", "−"), fmt_eur(abs(exp_p - imp_p))), "Balance trade of goods with the partners", sprintf("exports / imports = %.2f", exp_p / imp_p)),
+    kpi(prod_name, "Product", if (PROD == "TOTAL") "" else paste("HS2 chapter", PROD)))
+div(class = "card-box", div(class = "card-title", sprintf("Trade flows · %s ↔ %s · %d", params$reporter, paste(pts_p$NAME, collapse = ", "), yr)),
+    div(class = "card-sub", "Arrow width = value · blue arrows point into Luxembourg (imports), orange arrows point to the partner (exports) · label = value and share of the world total · hover an arrow for the details"),
+    p)
+tbl <- flows %>% select(NAME, FLOW, VALUE, SHARE) %>%
+  pivot_wider(names_from = FLOW, values_from = c(VALUE, SHARE)) %>%
+  transmute(Partner = NAME, Imports = fmt_eur(VALUE_IMPORT), `Share of imports` = fmt_pct(SHARE_IMPORT),
+            Exports = fmt_eur(VALUE_EXPORT), `Share of exports` = fmt_pct(SHARE_EXPORT),
+            `Balance trade of goods` = paste0(if_else(VALUE_EXPORT - VALUE_IMPORT >= 0, "+", "−"), fmt_eur(abs(VALUE_EXPORT - VALUE_IMPORT)))) %>%
+  arrange(desc(Imports))
+div(class = "card-box", div(class = "card-title", "Values behind the arrows"),
+    HTML(paste(knitr::kable(tbl, format = "html", align = c("l", "r", "r", "r", "r", "r"), table.attr = "class='table table-sm'"), collapse = "\n")))
+```

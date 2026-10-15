@@ -1,0 +1,1060 @@
+---
+title: "Séries temporelles"
+date: "`r format(Sys.Date(), '%d/%m/%Y')`"
+output:
+  html_document:
+    self_contained: true
+    toc: false
+    theme:
+      version: 5
+      bg: "#EEF9FD"
+      fg: "#271D67"
+      primary: "#1AADE7"
+      secondary: "#271D67"
+      base_font: !expr bslib::font_collection(bslib::font_google("Poppins", local = FALSE), "Segoe UI", "Arial", "sans-serif")
+      heading_font: !expr bslib::font_collection(bslib::font_google("Poppins", local = FALSE), "Segoe UI", "Arial", "sans-serif")
+params:
+  data_file: "data"         # nom du fichier JSON (avec ou sans extension), dans le MÊME dossier que ce Rmd
+  geo: "LU, BE"             # pays chargés, séparés par des virgules (ex. "LU", "LU, BE") ; "ALL" = tous les pays du fichier
+  product: "TOTAL"          # produit affiché à l'ouverture (code ou nom) ; un seul produit à la fois sur le graphique
+  indicator: ""             # indicateur affiché à l'ouverture (ex. "VALUE_IN_EUROS") ; "" = celui en euros, sinon le premier
+  flow: "import"            # flux affiché à l'ouverture : "import" ou "export"
+  freq: "monthly"           # fréquence à l'ouverture : "monthly" ou "annual"
+  agg: "sum"                # agrégation des lignes en double et des mois vers l'année : "sum" ou "mean"
+  geo_col: ""               # colonne pays ; "" = détection automatique (nom usuel, sinon colonne contenant les codes de params$geo)
+  product_col: "product"
+  indicator_col: "indicators"
+  flow_col: "flow"          # colonne du flux ; si introuvable, la colonne contenant IMPORT / EXPORT est utilisée
+  time_col: "TIME"
+  value_col: "OBS_VALUE"
+  pq_geo: "LU"              # Partie 2 (prix / quantités) : pays analysé
+  pq_min_obs: 36            # Partie 2 : nombre minimum de variations mensuelles pour estimer la régression
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+
+need <- c("tidyverse", "jsonlite", "plotly", "htmltools", "bslib")
+missing_pkgs <- need[!need %in% installed.packages()[, "Package"]]
+if (length(missing_pkgs) > 0) install.packages(missing_pkgs)
+
+library(tidyverse)
+library(jsonlite)
+library(plotly)
+library(htmltools)
+
+# ---- Charte graphique -----------------------------------------------------------------------
+COL_NAVY    <- "#271D67"
+COL_BLUE    <- "#1AADE7"
+COL_LAVEND  <- "#7B6FD0"
+COL_ORANGE  <- "#F39C12"
+COL_GREY    <- "#8A87A8"
+COL_RED     <- "#D7263D"
+COL_GREEN   <- "#2BB673"
+COL_PINK    <- "#E83E8C"
+FONT_FAMILY <- "Poppins, 'Segoe UI', Arial, sans-serif"
+```
+
+```{=html}
+<style>
+#header { display: none; }
+.main-container { max-width: none !important; width: 100%; padding: 0 !important; margin: 0; }
+body { background: #EEF9FD; }
+
+.cockpit { display: grid; grid-template-columns: 290px minmax(0, 1fr); min-height: 100vh; }
+
+/* ---- Barre latérale ---- */
+.cockpit-side {
+  position: sticky; top: 0; height: 100vh; overflow-y: auto;
+  background: #271D67; color: #FFFFFF; padding: 22px 20px;
+  display: flex; flex-direction: column; gap: 22px;
+}
+.cockpit-brand .eyebrow { font-size: 0.75em; letter-spacing: .12em; text-transform: uppercase; color: #1AADE7; }
+.cockpit-brand .geo { font-size: 2.4em; font-weight: 700; line-height: 1.1; }
+.cockpit-brand .sub { font-size: 0.8em; opacity: .75; }
+.cockpit-side .control-label { color: #FFFFFF; font-weight: 600; font-size: 0.85em;
+  text-transform: uppercase; letter-spacing: .06em; margin-bottom: 6px; }
+.side-legend { font-size: 0.8em; display: flex; flex-direction: column; gap: 6px; }
+.side-legend .swatch { display: inline-block; width: 18px; height: 12px; margin-right: 8px; border-radius: 3px; vertical-align: -1px; }
+.side-dims { font-size: 0.85em; opacity: .7; }
+.side-file { font-size: 0.75em; opacity: .85; word-break: break-all; }
+.side-file b { color: #1AADE7; font-weight: 600; }
+.side-footer { margin-top: auto; font-size: 0.75em; opacity: .7; }
+
+/* ---- Zone principale ---- */
+.cockpit-main { padding: 22px 28px 40px 28px; min-width: 0; }
+.proc-title { color: #271D67; font-weight: 700; margin: 0 0 6px 0; font-size: 1.7em; }
+.proc-lead { color: #4A4380; font-size: 0.9em; margin: 0 0 16px 0; max-width: 1100px; }
+.card-box { background: #FFFFFF; border-radius: 10px; padding: 14px 16px; margin-bottom: 18px;
+  box-shadow: 0 1px 3px rgba(39,29,103,.08); min-width: 0; }
+.card-title { font-size: 0.85em; font-weight: 600; text-transform: uppercase; letter-spacing: .06em;
+  color: #1AADE7; margin: 0 0 12px 0; }
+.warn-box { background: #FBE3E6; color: #8C1B2B; border-radius: 10px; padding: 12px 16px; margin-bottom: 18px; font-size: 0.9em; }
+.note { font-size: 0.8em; color: #8A87A8; margin-top: 6px; }
+.ts-empty { display: none; font-size: 0.85em; color: #D7263D; margin: 4px 0; }
+/* Info-bulle du survol unifié : fond blanc opaque + ombre (sécurité si le thème Plotly l'ignore) */
+.cockpit-main .hoverlayer .legend rect.bg { fill: #FFFFFF !important; fill-opacity: 0.97 !important;
+  stroke: #271D67 !important; filter: drop-shadow(0 2px 6px rgba(39,29,103,.25)); }
+
+/* ---- Filtres ---- */
+.filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 28px; margin-bottom: 8px; }
+.f-group { display: flex; flex-direction: column; gap: 6px; }
+.f-label { font-size: 0.75em; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: #4A4380; }
+.f-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.xc-btn { border: 1px solid #C9C4EC; background: #FFFFFF; color: #271D67; border-radius: 999px; padding: 4px 14px;
+  font-size: 0.85em; cursor: pointer; font-family: inherit; }
+.xc-btn:hover { border-color: #1AADE7; }
+.xc-btn.active { background: #271D67; border-color: #271D67; color: #FFFFFF; }
+.geo-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: -1px;
+  box-shadow: 0 0 0 2px #FFFFFF; }
+
+/* Menu déroulant (choix d'un produit) */
+.dd { position: relative; width: 420px; max-width: 100%; }
+.dd-toggle { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  border: 1px solid #C9C4EC; background: #FFFFFF; color: #271D67; border-radius: 8px; padding: 6px 12px;
+  font-size: 0.9em; font-family: inherit; cursor: pointer; text-align: left; }
+.dd-toggle:hover, .dd.open .dd-toggle { border-color: #1AADE7; }
+.dd-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dd-caret { flex: none; color: #1AADE7; transition: transform .15s; }
+.dd.open .dd-caret { transform: rotate(180deg); }
+.dd-panel { display: none; position: absolute; top: calc(100% + 4px); left: 0; z-index: 2000;
+  width: min(560px, 90vw); max-height: 440px; background: #FFFFFF; border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(39,29,103,.18); padding: 10px; flex-direction: column; }
+.dd.open .dd-panel { display: flex; }
+.dd-search { width: 100%; border: 1px solid #C9C4EC; border-radius: 8px; padding: 6px 10px; font-size: 0.85em;
+  color: #271D67; margin-bottom: 8px; font-family: inherit; }
+.dd-search:focus { outline: none; border-color: #1AADE7; }
+.dd-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 1px; }
+.prod-item { display: flex; align-items: flex-start; gap: 8px; font-size: 0.82em; line-height: 1.3; cursor: pointer;
+  padding: 4px 6px; border-radius: 6px; margin: 0; color: #271D67; }
+.prod-item:hover { background: #EEF9FD; }
+.prod-item input { margin-top: 3px; accent-color: #1AADE7; flex: none; }
+.prod-item .code { color: #8A87A8; flex: none; min-width: 34px; }
+
+/* ---- Partie 2 : prix et quantités ---- */
+.section-title { margin-top: 34px; }
+.pq-sub { font-size: 0.75em; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: #4A4380; margin: 16px 0 6px 0; }
+.pq-row { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(260px, 1fr); gap: 22px; align-items: start; }
+.pq-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.pq-stat { background: #EEF9FD; border-radius: 8px; padding: 10px 12px; }
+.pq-stat.wide { grid-column: 1 / -1; }
+.pq-stat .k { font-size: 0.72em; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: #4A4380; }
+.pq-stat .v { font-size: 1.35em; font-weight: 700; color: #271D67; font-variant-numeric: tabular-nums; }
+.pq-interp { font-size: 0.85em; color: #271D67; margin-top: 12px; line-height: 1.45; }
+.pq-interp.muted { color: #8A87A8; }
+.pq-table-wrap { max-height: 460px; overflow: auto; border: 1px solid #DDEFF8; border-radius: 8px; }
+table.pq-table { width: 100%; border-collapse: collapse; font-size: 0.82em; }
+.pq-table th { position: sticky; top: 0; z-index: 1; background: #271D67; color: #FFFFFF; text-align: left; padding: 8px 10px;
+  cursor: pointer; white-space: nowrap; font-weight: 600; user-select: none; }
+.pq-table th.num { text-align: right; }
+.pq-table th.sorted::after { content: " \25BE"; color: #1AADE7; }
+.pq-table th.sorted.asc::after { content: " \25B4"; }
+.pq-table td { padding: 6px 10px; border-bottom: 1px solid #EEF3F8; color: #271D67; }
+.pq-table td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pq-table td.sig { font-weight: 700; }
+.pq-table tbody tr { cursor: pointer; }
+.pq-table tbody tr:hover td { background: #EEF9FD; }
+.pq-table tbody tr.current td { background: #D6EFFA; }
+.pq-table tbody tr.na td { color: #8A87A8; }
+.sig-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #1AADE7; margin-left: 6px; vertical-align: 1px; }
+
+@media (max-width: 1000px) {
+  .pq-row { grid-template-columns: 1fr; }
+  .cockpit { grid-template-columns: 1fr; }
+  .cockpit-side { position: static; height: auto; }
+}
+</style>
+```
+
+```{r load-data}
+# ---- 1. Localiser le fichier JSON à côté de ce Rmd ------------------------------------------
+RMD_DIR <- local({
+  d <- tryCatch(knitr::current_input(dir = TRUE), error = function(e) NULL)
+  if (is.null(d)) getwd() else dirname(d)
+})
+
+JSON_EXT <- c("json", "jsonl", "ndjson")
+
+locate_data <- function(dir, name) {
+  direct <- file.path(dir, name)
+  if (file.exists(direct) && !dir.exists(direct)) return(normalizePath(direct, winslash = "/"))
+  files <- list.files(dir, full.names = TRUE)
+  cand  <- files[tolower(tools::file_path_sans_ext(basename(files))) == tolower(name) &
+                 tolower(tools::file_ext(files)) %in% JSON_EXT]
+  if (length(cand) == 0) stop("Aucun fichier '", name, ".json' trouvé dans : ", dir)
+  normalizePath(cand[1], winslash = "/")
+}
+
+DATA_PATH <- locate_data(RMD_DIR, params$data_file)
+
+# ---- 2. Lire le JSON et en extraire la table principale -------------------------------------
+TIME_NAMES <- c("TIME", "TIME_PERIOD", "year", "time", "annee", "année", "period")
+
+# Format JSON-stat (ex. API Eurostat) : dimensions + vecteur "value" -> table à plat.
+# Les libellés des modalités (code -> nom) sont conservés dans l'attribut "labels".
+jsonstat_to_table <- function(x) {
+  ids   <- as.character(unlist(x$id))
+  cats  <- lapply(ids, function(d) x$dimension[[d]]$category)
+  codes <- lapply(cats, function(ct) {
+    idx <- ct$index
+    if (is.null(idx)) idx <- names(ct$label)
+    if (!is.null(names(idx))) names(sort(unlist(idx))) else as.character(unlist(idx))
+  })
+  names(codes) <- ids
+  labels <- lapply(cats, function(ct) unlist(ct$label))
+  names(labels) <- ids
+
+  # JSON-stat : la dernière dimension varie le plus vite
+  grid <- do.call(expand.grid, c(rev(codes), stringsAsFactors = FALSE))[, ids, drop = FALSE]
+  v <- x$value
+  vals <- rep(NA_real_, nrow(grid))
+  if (is.list(v) || !is.null(names(v))) {           # format « creux » : { "index": valeur }
+    vals[as.integer(names(v)) + 1L] <- as.numeric(unlist(v))
+  } else {
+    vals[seq_along(v)] <- as.numeric(v)
+  }
+  res <- as_tibble(grid) %>% mutate(value = vals)
+  attr(res, "labels") <- labels
+  res
+}
+
+read_json_table <- function(path) {
+  x <- tryCatch(fromJSON(path, flatten = TRUE), error = function(e) NULL)
+  if (is.null(x)) return(as_tibble(stream_in(file(path), verbose = FALSE, flatten = TRUE)))   # NDJSON
+
+  if (is.list(x) && all(c("id", "size", "dimension", "value") %in% names(x))) return(jsonstat_to_table(x))
+
+  # Cherche tous les data frames imbriqués ; garde celui qui contient une colonne temps (puis le plus grand)
+  find_df <- function(o) {
+    if (is.data.frame(o)) return(list(o))
+    if (is.list(o)) return(do.call(c, lapply(o, find_df)))
+    NULL
+  }
+  dfs <- find_df(x)
+  if (length(dfs) == 0) {
+    cat("Structure du JSON :\n"); str(x, max.level = 2, list.len = 10)
+    stop("Aucune table (liste d'enregistrements) trouvée dans ", path)
+  }
+  has_time <- vapply(dfs, function(d) any(tolower(names(d)) %in% tolower(TIME_NAMES)), logical(1))
+  pool <- if (any(has_time)) dfs[has_time] else dfs
+  as_tibble(pool[[which.max(vapply(pool, nrow, integer(1)))]])
+}
+
+raw <- read_json_table(DATA_PATH)
+if (nrow(raw) == 0) stop("Le fichier ", DATA_PATH, " est vide.")
+JSON_LABELS <- attr(raw, "labels")     # NULL si le JSON n'est pas au format JSON-stat
+
+# ---- 3. Repérer les colonnes ----------------------------------------------------------------
+find_col <- function(df, wanted, alternatives, exclude = character(0)) {
+  for (p in unique(c(wanted, alternatives))) {
+    if (!nzchar(p)) next
+    hit <- setdiff(names(df)[tolower(names(df)) == tolower(p)], exclude)
+    if (length(hit) > 0) return(hit[1])
+  }
+  NA_character_
+}
+
+COLS <- list(
+  prod  = find_col(raw, params$product_col, c("product", "products", "produit", "produits", "prod")),
+  time  = find_col(raw, params$time_col,    c("TIME", "TIME_PERIOD", "year", "time", "annee", "année", "period")),
+  value = find_col(raw, params$value_col,   c("OBS_VALUE", "VALUE", "value", "values", "valeur"))
+)
+if (is.na(COLS$time)) stop("Colonne temps introuvable. Colonnes disponibles : ", paste(names(raw), collapse = ", "))
+if (is.na(COLS$prod)) stop("Colonne produit introuvable (params$product_col). Colonnes disponibles : ", paste(names(raw), collapse = ", "))
+if (is.na(COLS$value)) {
+  num <- names(raw)[vapply(raw, is.numeric, logical(1)) & names(raw) != COLS$time]
+  if (length(num) == 0) stop("Colonne de valeurs introuvable (params$value_col). Colonnes disponibles : ", paste(names(raw), collapse = ", "))
+  COLS$value <- num[1]
+}
+COLS$ind <- find_col(raw, params$indicator_col, c("indicators", "indicator", "indic", "indicateur", "unit", "measure"),
+                     exclude = unlist(COLS))
+
+# Colonne du flux (import / export) : par son nom, sinon par ses valeurs
+COLS$flow <- find_col(raw, params$flow_col, c("flow", "flows", "trade_flow", "stk_flow", "flux", "flow_code", "trade_type"),
+                      exclude = unlist(COLS))
+if (is.na(COLS$flow)) {
+  cand <- setdiff(names(raw), unlist(COLS))
+  cand <- cand[vapply(cand, function(cl) {
+    x <- raw[[cl]]
+    if (!(is.character(x) || is.factor(x))) return(FALSE)
+    u <- toupper(unique(as.character(x)))
+    length(u) <= 4 && any(str_detect(u, "IMP")) && any(str_detect(u, "EXP"))
+  }, logical(1))]
+  if (length(cand) > 0) COLS$flow <- cand[1]
+}
+
+# Colonne pays : 1) params$geo_col ou nom usuel ; 2) sinon la colonne qui contient les codes demandés (ex. LU et BE)
+GEO_TOKENS <- toupper(trimws(strsplit(params$geo, ",")[[1]]))
+GEO_TOKENS <- GEO_TOKENS[nzchar(GEO_TOKENS) & GEO_TOKENS != "ALL"]
+GEO_NAME_RX <- "rep|decl|geo|country|pays|area|member"
+
+COLS$geo <- find_col(raw, params$geo_col, c("geo", "country", "ref_area", "cntry", "pays", "reporter", "declarant",
+                                            "reporter_code", "reporter_iso", "declarant_iso", "country_code",
+                                            "geo_code", "member_state", "ms", "iso2", "iso"),
+                     exclude = unlist(COLS))
+if (is.na(COLS$geo)) {
+  cand <- setdiff(names(raw), unlist(COLS))
+  cand <- cand[vapply(cand, function(cl) is.character(raw[[cl]]) || is.factor(raw[[cl]]), logical(1))]
+  cand <- if (length(GEO_TOKENS) > 0) {
+    cand[vapply(cand, function(cl) all(GEO_TOKENS %in% toupper(unique(as.character(raw[[cl]])))), logical(1))]
+  } else {
+    cand[grepl(GEO_NAME_RX, cand, ignore.case = TRUE)]
+  }
+  if (length(cand) > 0) {
+    pri <- grepl(GEO_NAME_RX, cand, ignore.case = TRUE) & !grepl("partner", cand, ignore.case = TRUE)
+    COLS$geo <- c(cand[pri], cand[!pri])[1]
+  }
+}
+
+# Libellés des produits : JSON-stat si disponible, sinon une colonne de libellé voisine, sinon le code
+prod_codes  <- as.character(raw[[COLS$prod]])
+prod_labels <- prod_codes
+LAB_COL     <- character(0)
+lab_map <- if (!is.null(JSON_LABELS)) JSON_LABELS[[COLS$prod]] else NULL
+if (!is.null(lab_map)) {
+  hit <- unname(lab_map[prod_codes])
+  prod_labels <- ifelse(is.na(hit) | hit == "", prod_codes, hit)
+} else {
+  LAB_COL <- names(raw)[tolower(names(raw)) %in% tolower(c(
+    paste0(COLS$prod, c("_label", "_name", "_title", "_desc", "_libelle")), "label", "libelle", "libellé", "name", "nom", "title"))]
+  LAB_COL <- head(setdiff(LAB_COL, unlist(COLS)), 1)
+  if (length(LAB_COL) > 0) {
+    hit <- as.character(raw[[LAB_COL]])
+    prod_labels <- ifelse(is.na(hit) | hit == "", prod_codes, hit)
+  }
+}
+
+# Autres dimensions du fichier (agrégées par params$agg) : affichées pour information
+OTHER_DIMS <- setdiff(names(raw), c(unlist(COLS), LAB_COL))
+OTHER_DIMS <- OTHER_DIMS[vapply(OTHER_DIMS, function(cl) {
+  x <- raw[[cl]]; (is.character(x) || is.factor(x)) && n_distinct(x) > 1
+}, logical(1))]
+
+# Période -> premier jour du mois. Formats acceptés : 2020-01, 2020M01, 2020-M01, 202001, 2020-01-15
+parse_month <- function(x) {
+  x <- trimws(as.character(x))
+  y <- suppressWarnings(as.integer(substr(x, 1, 4)))
+  m <- suppressWarnings(as.integer(str_match(x, "^\\d{4}[-_/ ]?[Mm]?(\\d{1,2})")[, 2]))
+  m[is.na(m) | m < 1 | m > 12] <- 1L
+  out <- as.Date(rep(NA_character_, length(x)))
+  ok  <- !is.na(y)
+  out[ok] <- as.Date(sprintf("%04d-%02d-01", y[ok], m[ok]))
+  out
+}
+
+dat <- tibble(
+  GEO    = if (is.na(COLS$geo)) "(tous)" else as.character(raw[[COLS$geo]]),
+  PROD   = prod_codes,
+  PLABEL = prod_labels,
+  IND    = if (is.na(COLS$ind)) "VALUE" else as.character(raw[[COLS$ind]]),
+  FLOW   = if (is.na(COLS$flow)) "ALL" else as.character(raw[[COLS$flow]]),
+  DATE   = parse_month(raw[[COLS$time]]),
+  VAL    = suppressWarnings(as.numeric(raw[[COLS$value]]))
+) %>%
+  filter(!is.na(DATE), !is.na(VAL), !is.na(PROD), !is.na(IND), !is.na(FLOW))
+
+dat_allgeo <- dat     # copie avant le filtre pays (utilisée par la partie 2)
+
+# ---- 4. Pays --------------------------------------------------------------------------------
+if (is.na(COLS$geo)) {
+  GEOS <- "(tous)"
+} else {
+  avail <- sort(unique(dat$GEO))
+  if (length(GEO_TOKENS) == 0) {
+    GEOS <- avail
+  } else {
+    unknown <- GEO_TOKENS[!GEO_TOKENS %in% toupper(avail)]
+    if (length(unknown) > 0) stop("Pays introuvable(s) dans la colonne '", COLS$geo, "' : ", paste(unknown, collapse = ", "),
+                                  ". Valeurs disponibles : ", paste(head(avail, 50), collapse = ", "))
+    GEOS <- avail[match(GEO_TOKENS, toupper(avail))]       # ordre donné dans les paramètres
+  }
+  dat <- filter(dat, GEO %in% GEOS)
+}
+GEO_LAB <- setNames(GEOS, GEOS)
+if (!is.na(COLS$geo) && !is.null(JSON_LABELS[[COLS$geo]])) {
+  gl <- unname(JSON_LABELS[[COLS$geo]][GEOS]); GEO_LAB <- setNames(ifelse(is.na(gl), GEOS, gl), GEOS)
+}
+GEO_PALETTE <- c(COL_BLUE, COL_ORANGE, COL_LAVEND, COL_GREEN, COL_RED, COL_PINK)
+GEO_COL     <- setNames(rep_len(GEO_PALETTE, length(GEOS)), GEOS)
+
+# ---- 5. Indicateurs -------------------------------------------------------------------------
+IND_CODES <- sort(unique(dat$IND))
+ind_label <- function(code) {
+  jl <- if (!is.na(COLS$ind) && !is.null(JSON_LABELS[[COLS$ind]])) unname(JSON_LABELS[[COLS$ind]][code]) else NA_character_
+  up <- toupper(code)
+  case_when(
+    !is.na(jl) & jl != "" ~ jl,
+    str_detect(up, "EURO")             ~ "Valeur (\u20ac)",
+    str_detect(up, "100 ?KG")          ~ "Quantité (100 kg)",
+    str_detect(up, "KG")               ~ "Quantité (kg)",
+    str_detect(up, "SUPP")             ~ "Unités supplémentaires",
+    TRUE                               ~ code
+  )
+}
+IND_LAB <- setNames(ind_label(IND_CODES), IND_CODES)
+DEFAULT_IND <- {
+  hit <- IND_CODES[toupper(IND_CODES) == toupper(params$indicator)]
+  if (length(hit) == 0) hit <- IND_CODES[str_detect(toupper(IND_CODES), "EURO")]
+  if (length(hit) == 0) hit <- IND_CODES
+  hit[1]
+}
+# ---- 5b. Flux (import / export) -------------------------------------------------------------
+# Codes usuels : 1 / IMP / IMPORT / M = import ; 2 / EXP / EXPORT / X = export
+FLOW_CODES <- unique(dat$FLOW)
+flow_kind <- function(code) {
+  up <- toupper(trimws(code))
+  case_when(up %in% c("1", "M") | str_detect(up, "^IMP") ~ "import",
+            up %in% c("2", "X") | str_detect(up, "^EXP") ~ "export",
+            TRUE ~ NA_character_)
+}
+FLOW_LAB <- setNames(
+  vapply(FLOW_CODES, function(cd) {
+    jl <- if (!is.na(COLS$flow) && !is.null(JSON_LABELS[[COLS$flow]])) unname(JSON_LABELS[[COLS$flow]][cd]) else NA_character_
+    k  <- flow_kind(cd)
+    if (!is.na(k)) c(import = "Import", export = "Export")[[k]] else if (!is.na(jl)) jl else cd
+  }, character(1)),
+  FLOW_CODES)
+FLOW_CODES <- FLOW_CODES[order(match(flow_kind(FLOW_CODES), c("import", "export")), FLOW_CODES)]   # Import puis Export
+FLOW_LAB   <- FLOW_LAB[FLOW_CODES]
+DEFAULT_FLOW <- {
+  want <- tolower(trimws(params$flow))
+  hit  <- FLOW_CODES[flow_kind(FLOW_CODES) %in% want | tolower(FLOW_CODES) == want]
+  if (length(hit) == 0) FLOW_CODES[1] else hit[1]
+}
+
+DEFAULT_FREQ <- if (tolower(params$freq) %in% c("annual", "annuel", "a", "y", "year")) "y" else "m"
+
+# ---- 6. Produits (un seul affiché) ----------------------------------------------------------
+PRODUCTS <- dat %>%
+  distinct(PROD, PLABEL) %>%
+  distinct(PROD, .keep_all = TRUE) %>%
+  arrange(PROD) %>%
+  mutate(DISPLAY = if_else(duplicated(PLABEL) | duplicated(PLABEL, fromLast = TRUE),
+                           paste0(PLABEL, " (", PROD, ")"), PLABEL))
+
+key <- function(x) tolower(trimws(x))
+match_prod <- function(tok) which(key(PRODUCTS$PROD) == key(tok) | key(PRODUCTS$PLABEL) == key(tok) | key(PRODUCTS$DISPLAY) == key(tok))
+first_hit <- head(c(match_prod(params$product), match_prod("TOTAL"), 1L), 1)
+if (length(match_prod(params$product)) == 0) warning("Produit introuvable : ", params$product, " \u2013 affichage de : ", PRODUCTS$DISPLAY[first_hit])
+PRODUCTS$SEL <- seq_len(nrow(PRODUCTS)) == first_hit
+
+# ---- 7. Séries mensuelles et annuelles (pays x produit x indicateur) -------------------------
+AGG_FUN <- if (tolower(params$agg) == "mean") mean else sum
+
+ts_m <- dat %>%
+  group_by(GEO, PROD, IND, FLOW, DATE) %>%
+  summarise(VAL = AGG_FUN(VAL), .groups = "drop")
+
+ts_y <- ts_m %>%
+  mutate(YEAR = as.integer(format(DATE, "%Y"))) %>%
+  group_by(GEO, PROD, IND, FLOW, YEAR) %>%
+  summarise(VAL = AGG_FUN(VAL), NM = n(), .groups = "drop")      # NM : nombre de mois disponibles
+
+MONTHS <- sort(unique(ts_m$DATE))
+YEARS  <- sort(unique(ts_y$YEAR))
+
+# Valeurs alignées sur l'axe commun (NA = pas de donnée), une entrée par "pays|produit|indicateur|flux"
+align <- function(d, pos, n, col) {
+  keys <- paste(d$GEO, d$PROD, d$IND, d$FLOW, sep = "|")
+  lapply(split(seq_len(nrow(d)), keys), function(ix) { v <- rep(NA_real_, n); v[pos[ix]] <- d[[col]][ix]; v })
+}
+TSDATA <- list(
+  months = format(MONTHS, "%Y-%m-%d"),
+  years  = sprintf("%d-01-01", YEARS),
+  m      = align(ts_m, match(ts_m$DATE, MONTHS), length(MONTHS), "VAL"),
+  y      = align(ts_y, match(ts_y$YEAR, YEARS),  length(YEARS),  "VAL"),
+  n      = align(ts_y, match(ts_y$YEAR, YEARS),  length(YEARS),  "NM"),
+  geos   = I(GEOS),                 # I() : reste un tableau même avec un seul pays
+  ind    = as.list(IND_LAB),
+  flow0  = DEFAULT_FLOW
+)
+```
+
+```{r helpers}
+fmt_int <- function(x) ifelse(is.na(x), "\u2013", formatC(x, format = "d", big.mark = ","))
+
+theme_plotly <- function(p) {
+  p %>%
+    layout(
+      font          = list(family = FONT_FAMILY, color = COL_NAVY),
+      paper_bgcolor = "rgba(0,0,0,0)",
+      plot_bgcolor  = "#FFFFFF",
+      # Info-bulle opaque et lisible (sinon, en survol unifié, elle prend le fond transparent de la page)
+      hoverlabel    = list(bgcolor = "rgba(255,255,255,0.97)", bordercolor = COL_NAVY, align = "left",
+                           font = list(family = FONT_FAMILY, size = 14, color = COL_NAVY)),
+      spikedistance = -1
+    ) %>%
+    config(displaylogo = FALSE)
+}
+
+axis_style <- list(gridcolor = "#DDEFF8", zerolinecolor = "#DDEFF8", linecolor = COL_NAVY)
+
+# Une courbe par pays ; produit, indicateur et fréquence sont remplis par le script de la page
+plot_timeseries <- function() {
+  prod <- PRODUCTS$PROD[PRODUCTS$SEL]
+  p <- plot_ly()
+  for (g in GEOS) {
+    s <- filter(ts_m, GEO == g, PROD == prod, IND == DEFAULT_IND, FLOW == DEFAULT_FLOW)
+    if (nrow(s) == 0) s <- tibble(DATE = MONTHS[1], VAL = NA_real_)
+    p <- add_trace(
+      p, x = s$DATE, y = s$VAL, type = "scatter", mode = "lines", name = g,
+      line = list(color = GEO_COL[[g]], width = 2.2),
+      marker = list(color = GEO_COL[[g]], size = 6, line = list(color = "#FFFFFF", width = 1.5)),
+      hovertemplate = "%{fullData.name}: <b>%{y:,.0f}</b><extra></extra>"
+    )
+  }
+  p %>%
+    layout(
+      xaxis = c(axis_style, list(
+        title = "", type = "date", hoverformat = "%B %Y",
+        showspikes = TRUE, spikemode = "across", spikesnap = "cursor", spikethickness = 1, spikedash = "dot", spikecolor = COL_GREY,
+        rangeselector = list(
+          buttons = list(
+            list(count = 1,  label = "1 an",   step = "year", stepmode = "backward"),
+            list(count = 5,  label = "5 ans",  step = "year", stepmode = "backward"),
+            list(count = 10, label = "10 ans", step = "year", stepmode = "backward"),
+            list(step = "all", label = "Tout")),
+          font = list(family = FONT_FAMILY, size = 11), bgcolor = "#EEF9FD", activecolor = "#BDE6F7")
+      )),
+      yaxis = c(axis_style, list(title = IND_LAB[[DEFAULT_IND]], rangemode = "tozero")),
+      hovermode = "x unified", showlegend = FALSE,
+      margin = list(t = 10, l = 10, b = 30)
+    ) %>%
+    theme_plotly() %>%
+    { .$height <- 540; . }
+}
+```
+
+```{r pq-data}
+# ==== Partie 2 : prix unitaires et quantités (un seul pays, LU par défaut) ====================
+# Prix unitaire = valeur (€) / quantité ; variations mensuelles en log ; régression dlog(Q) ~ dlog(P)
+PQ_GEO <- toupper(trimws(params$pq_geo))
+PQ_MIN <- max(3L, as.integer(params$pq_min_obs))
+up_ind <- toupper(IND_CODES)
+V_IND  <- IND_CODES[str_detect(up_ind, "EURO")][1]
+Q_IND  <- c(IND_CODES[str_detect(up_ind, "100 ?KG")], IND_CODES[str_detect(up_ind, "KG")])[1]
+Q_UNIT <- if (is.na(Q_IND)) "" else if (str_detect(toupper(Q_IND), "100 ?KG")) "100 kg" else "kg"
+
+PQ_MSG <- NULL
+if (is.na(V_IND) || is.na(Q_IND)) {
+  PQ_MSG <- sprintf("Indicateurs valeur (€) et quantité (kg) introuvables. Indicateurs disponibles : %s.",
+                    paste(IND_CODES, collapse = ", "))
+} else if (is.na(COLS$geo) || !PQ_GEO %in% toupper(dat_allgeo$GEO)) {
+  PQ_MSG <- sprintf("Pays %s introuvable dans les données.", PQ_GEO)
+}
+
+pq <- tibble()
+if (is.null(PQ_MSG)) {
+  pq <- dat_allgeo %>%
+    filter(toupper(GEO) == PQ_GEO, IND %in% c(V_IND, Q_IND)) %>%
+    mutate(IND = if_else(IND == V_IND, "V", "Q")) %>%
+    group_by(PROD, FLOW, DATE, IND) %>%
+    summarise(VAL = sum(VAL), .groups = "drop") %>%
+    pivot_wider(names_from = IND, values_from = VAL)
+  for (cl in c("V", "Q")) if (!cl %in% names(pq)) pq[[cl]] <- NA_real_
+
+  pq <- pq %>%
+    filter(V > 0, Q > 0) %>%                                        # mois avec valeur ET quantité positives
+    arrange(PROD, FLOW, DATE) %>%
+    group_by(PROD, FLOW) %>%
+    mutate(
+      P   = V / Q,
+      MI  = as.integer(format(DATE, "%Y")) * 12L + as.integer(format(DATE, "%m")),
+      CON = (MI - lag(MI)) == 1L,                                   # variation calculée sur deux mois consécutifs uniquement
+      dP  = if_else(CON, log(P) - lag(log(P)), NA_real_),
+      dQ  = if_else(CON, log(Q) - lag(log(Q)), NA_real_)
+    ) %>%
+    ungroup()
+  if (nrow(pq) == 0) PQ_MSG <- sprintf("Aucun mois avec une valeur et une quantité positives pour %s.", PQ_GEO)
+}
+PQ_OK <- is.null(PQ_MSG)
+
+# Régression dlog(Q) = a + b * dlog(P) ; b = « élasticité » apparente
+fit_pq <- function(dp, dq) {
+  ok <- is.finite(dp) & is.finite(dq)
+  n  <- sum(ok)
+  if (n < PQ_MIN || !isTRUE(sd(dp[ok]) > 0)) return(list(n = n))
+  m  <- summary(lm(dq[ok] ~ dp[ok]))
+  cf <- m$coefficients
+  b  <- cf[2, 1]; se <- cf[2, 2]; tq <- qt(0.975, n - 2)
+  lapply(list(n = n, a = cf[1, 1], b = b, se = se, lo = b - tq * se, hi = b + tq * se,
+              r2 = m$r.squared, pv = cf[2, 4]), function(x) signif(x, 6))
+}
+
+K_EMPTY <- list(d = NA_character_, p = NA_real_, q = NA_real_, dp = NA_real_, dq = NA_real_, s = list(n = 0))
+
+if (PQ_OK) {
+  PQ_PRODUCTS <- dat_allgeo %>%
+    filter(PROD %in% pq$PROD) %>%
+    distinct(PROD, PLABEL) %>%
+    distinct(PROD, .keep_all = TRUE) %>%
+    arrange(PROD) %>%
+    mutate(DISPLAY = if_else(duplicated(PLABEL) | duplicated(PLABEL, fromLast = TRUE),
+                             paste0(PLABEL, " (", PROD, ")"), PLABEL))
+  hit <- head(c(which(key(PQ_PRODUCTS$PROD) == key(params$product) | key(PQ_PRODUCTS$PLABEL) == key(params$product)),
+                which(toupper(PQ_PRODUCTS$PROD) == "TOTAL"), 1L), 1)
+  PQ_PRODUCTS$SEL <- seq_len(nrow(PQ_PRODUCTS)) == hit
+
+  PQ_FLOWS <- FLOW_CODES[FLOW_CODES %in% pq$FLOW]
+  PQ_FLOW0 <- if (DEFAULT_FLOW %in% PQ_FLOWS) DEFAULT_FLOW else PQ_FLOWS[1]
+
+  sig6 <- function(x) I(signif(x, 6))                               # I() : toujours un tableau en JSON
+  PQDATA <- list(
+    flows = as.list(FLOW_LAB[PQ_FLOWS]),
+    flow0 = PQ_FLOW0,
+    k = lapply(split(pq, paste(pq$PROD, pq$FLOW, sep = "|")), function(d) list(
+      d  = I(format(d$DATE, "%Y-%m-01")),
+      p  = sig6(d$P), q = sig6(d$Q), dp = sig6(d$dP), dq = sig6(d$dQ),
+      s  = fit_pq(d$dP, d$dQ)
+    ))
+  )
+  K0 <- PQDATA$k[[paste(PQ_PRODUCTS$PROD[PQ_PRODUCTS$SEL], PQ_FLOW0, sep = "|")]]
+  if (is.null(K0)) K0 <- K_EMPTY
+}
+
+COL_PRICE <- COL_PINK
+spike_x   <- list(showspikes = TRUE, spikemode = "across", spikesnap = "cursor", spikethickness = 1,
+                  spikedash = "dot", spikecolor = COL_GREY)
+
+# Graphique 1 : quantité (axe gauche) et prix unitaire (axe droit) dans le temps
+pq_ts_plot <- function(k) {
+  x <- as.Date(as.character(k$d))
+  plot_ly() %>%
+    add_trace(x = x, y = as.numeric(k$q), type = "scatter", mode = "lines", name = paste0("Quantité (", Q_UNIT, ")"),
+              line = list(color = COL_BLUE, width = 2),
+              hovertemplate = "Quantité : <b>%{y:,.0f}</b><extra></extra>") %>%
+    add_trace(x = x, y = as.numeric(k$p), type = "scatter", mode = "lines", name = paste0("Prix unitaire (€ / ", Q_UNIT, ")"),
+              yaxis = "y2", line = list(color = COL_PRICE, width = 2),
+              hovertemplate = "Prix unitaire : <b>%{y:,.2f} €</b><extra></extra>") %>%
+    layout(
+      xaxis  = c(axis_style, list(title = "", type = "date", hoverformat = "%B %Y"), spike_x),
+      yaxis  = c(axis_style, list(title = list(text = paste0("Quantité (", Q_UNIT, ")"), font = list(color = COL_BLUE)),
+                                  rangemode = "tozero")),
+      yaxis2 = list(title = list(text = paste0("Prix unitaire (€ / ", Q_UNIT, ")"), font = list(color = COL_PRICE)),
+                    overlaying = "y", side = "right", showgrid = FALSE, rangemode = "tozero", linecolor = COL_NAVY),
+      hovermode = "x unified",
+      legend = list(orientation = "h", x = 0, xanchor = "left", y = 1.12, yanchor = "bottom"),
+      margin = list(t = 30, l = 10, r = 70, b = 30)
+    ) %>%
+    theme_plotly() %>%
+    { .$height <- 420; . }
+}
+
+# Graphique 2 : nuage dlog(P) / dlog(Q) + droite de régression
+pq_sc_plot <- function(k) {
+  dp <- as.numeric(k$dp); dq <- as.numeric(k$dq)
+  ok <- is.finite(dp) & is.finite(dq)
+  s  <- k$s
+  lx <- if (!is.null(s$b) && any(ok)) range(dp[ok]) else NA_real_
+  ly <- if (!is.null(s$b) && any(ok)) s$a + s$b * lx else NA_real_
+  zero <- list(zeroline = TRUE, zerolinecolor = "#B8B4D9", zerolinewidth = 1.5, tickformat = ".0%")
+  plot_ly() %>%
+    add_trace(x = dp[ok], y = dq[ok], customdata = as.character(k$d)[ok], type = "scatter", mode = "markers", name = "Mois",
+              marker = list(color = COL_BLUE, opacity = 0.55, size = 7, line = list(color = "#FFFFFF", width = 0.5)),
+              hovertemplate = "%{customdata}<br>Prix : <b>%{x:+.1%}</b><br>Quantité : <b>%{y:+.1%}</b><extra></extra>") %>%
+    add_trace(x = lx, y = ly, type = "scatter", mode = "lines", name = "Régression",
+              line = list(color = COL_NAVY, width = 2.5), hoverinfo = "skip") %>%
+    layout(
+      xaxis = modifyList(axis_style, c(list(title = "Variation mensuelle du prix unitaire (log)"), zero)),
+      yaxis = modifyList(axis_style, c(list(title = "Variation mensuelle de la quantité (log)"), zero)),
+      hovermode = "closest", showlegend = FALSE,
+      margin = list(t = 10, l = 10, r = 10, b = 40)
+    ) %>%
+    theme_plotly() %>%
+    { .$height <- 420; . }
+}
+```
+
+```{r cockpit}
+# ---- Barre latérale -------------------------------------------------------------------------
+sidebar <- div(
+  class = "cockpit-side",
+  div(
+    class = "cockpit-brand",
+    div(class = "eyebrow", "Séries temporelles"),
+    div(class = "geo", paste(GEOS, collapse = " \u00b7 ")),
+    div(class = "sub", sprintf("%s \u2013 %s", format(min(MONTHS), "%m/%Y"), format(max(MONTHS), "%m/%Y")))
+  ),
+  div(
+    class = "side-legend",
+    div(class = "control-label", "Pays"),
+    lapply(GEOS, function(g) div(span(class = "swatch", style = paste0("background:", GEO_COL[[g]], ";")),
+                                 if (GEO_LAB[[g]] != g) paste0(g, " \u2013 ", GEO_LAB[[g]]) else g))
+  ),
+  div(class = "side-file",
+      div(class = "control-label", "Fichier source"),
+      tags$b(basename(DATA_PATH)),
+      div(sprintf("%s lignes \u00b7 valeur : %s", fmt_int(nrow(raw)), COLS$value)),
+      div(sprintf("pays : %s \u00b7 produit : %s \u00b7 indicateur : %s \u00b7 flux : %s",
+                  if (is.na(COLS$geo)) "\u2013" else COLS$geo, COLS$prod, if (is.na(COLS$ind)) "\u2013" else COLS$ind,
+                  if (is.na(COLS$flow)) "\u2013" else COLS$flow)),
+      if (length(OTHER_DIMS) > 0) div(class = "side-dims", style = "margin-top:4px;",
+                                      sprintf("Agrégé (%s) sur : %s", params$agg, paste(OTHER_DIMS, collapse = ", ")))),
+  div(class = "side-footer", sprintf("Généré le %s", format(Sys.Date(), "%d/%m/%Y")))
+)
+
+# ---- Filtres --------------------------------------------------------------------------------
+btn_group <- function(label, cls, items, active, extra = NULL) {
+  div(class = "f-group",
+      span(class = "f-label", label),
+      div(class = "f-row",
+          lapply(seq_along(items), function(i) {
+            tags$button(type = "button", class = paste("xc-btn", cls, if (names(items)[i] %in% active) "active"),
+                        `data-v` = names(items)[i], if (!is.null(extra)) extra(names(items)[i]), items[[i]])
+          })))
+}
+
+geo_filter <- btn_group("Pays", "geo-btn", setNames(as.list(GEOS), GEOS), GEOS,
+                        extra = function(g) span(class = "geo-dot", style = paste0("background:", GEO_COL[[g]], ";")))
+ind_filter  <- btn_group("Indicateur", "ind-btn", as.list(IND_LAB), DEFAULT_IND)
+freq_filter <- btn_group("Fréquence", "freq-btn", list(m = "Mensuel", y = "Annuel"), DEFAULT_FREQ)
+flow_filter <- if (!is.na(COLS$flow)) btn_group("Flux", "flow-btn", as.list(FLOW_LAB), DEFAULT_FLOW)
+
+# Menu déroulant à choix unique (un par partie : classes et nom de groupe distincts)
+make_dd <- function(products, chk_class, radio_name, label = "Produit") {
+  div(
+    class = "f-group",
+    span(class = "f-label", label),
+    div(
+      class = "dd",
+      tags$button(type = "button", class = "dd-toggle", span(class = "dd-text", "…"), span(class = "dd-caret", "▾")),
+      div(
+        class = "dd-panel",
+        tags$input(type = "search", class = "dd-search", placeholder = "Rechercher un produit (nom ou code)…"),
+        div(class = "dd-list",
+            lapply(seq_len(nrow(products)), function(i) {
+              tags$label(
+                class = "prod-item", `data-name` = tolower(paste(products$PROD[i], products$DISPLAY[i])),
+                `data-label` = products$DISPLAY[i], title = products$DISPLAY[i],
+                tags$input(type = "radio", name = radio_name, class = chk_class, value = products$PROD[i],
+                           checked = if (products$SEL[i]) NA else NULL),
+                if (products$PROD[i] != products$DISPLAY[i]) span(class = "code", products$PROD[i]),
+                span(products$DISPLAY[i])
+              )
+            }))
+      )
+    )
+  )
+}
+
+prod_filter <- make_dd(PRODUCTS, "prod-chk", "prod-radio")
+
+# ---- Partie 2 : prix et quantités -----------------------------------------------------------
+pq_stat <- function(cls, label, wide = FALSE) {
+  div(class = paste("pq-stat", cls, if (wide) "wide"), div(class = "k", label), div(class = "v", "–"))
+}
+pq_th <- function(k, label, num = TRUE) tags$th(`data-k` = k, class = if (num) "num", label)
+
+pq_section <- if (!PQ_OK) div(class = "warn-box", PQ_MSG) else div(
+  class = "card-box pq-section",
+  div(class = "card-title pq-title", "…"),
+  div(class = "filters",
+      make_dd(PQ_PRODUCTS, "pq-chk", "pq-radio"),
+      btn_group("Flux", "pq-flow-btn", as.list(FLOW_LAB[PQ_FLOWS]), PQ_FLOW0)),
+  div(class = "ts-empty pq-empty", "Aucune donnée de prix / quantité pour cette combinaison produit / flux."),
+  div(class = "pq-sub", "Quantité et prix unitaire"),
+  div(class = "pq-ts", pq_ts_plot(K0)),
+  div(
+    class = "pq-row",
+    div(div(class = "pq-sub", "Variations mensuelles : prix vs quantité"),
+        div(class = "pq-sc", pq_sc_plot(K0))),
+    div(div(class = "pq-sub", "Régression dlog(Q) = a + b · dlog(P)"),
+        div(class = "pq-stats",
+            pq_stat("st-b", "Élasticité (b)"),
+            pq_stat("st-n", "Mois utilisés"),
+            pq_stat("st-ci", "IC 95 % de b", wide = TRUE),
+            pq_stat("st-r2", "R²"),
+            pq_stat("st-p", "p-value")),
+        div(class = "pq-interp", ""),
+        div(class = "note", style = "margin-top:12px;",
+            "Prix unitaire = valeur / quantité : c'est une valeur unitaire, qui bouge aussi quand la composition du produit change. ",
+            "Comme le prix est calculé à partir de la quantité, le bruit sur la quantité pousse mécaniquement b vers le négatif. ",
+            "Les variations mensuelles restent marquées par la saisonnalité, et la relation est une corrélation, pas une élasticité de demande."))
+  ),
+  div(class = "pq-sub", style = "margin-top:22px;", "Tous les produits"),
+  div(class = "note", style = "margin:0 0 8px 0;",
+      sprintf("Cliquez sur une ligne pour afficher le produit, sur un en-tête pour trier. Point bleu = significatif au seuil de 5 %%. Régression estimée seulement à partir de %d variations mensuelles.", PQ_MIN)),
+  div(class = "pq-table-wrap",
+      tags$table(class = "pq-table",
+                 tags$thead(tags$tr(pq_th("label", "Produit", num = FALSE), pq_th("n", "Mois"), pq_th("b", "Élasticité"),
+                                    pq_th("ci", "IC 95 %"), pq_th("r2", "R²"), pq_th("pv", "p-value"))),
+                 tags$tbody()))
+)
+
+main <- div(
+  class = "cockpit-main",
+  h2(class = "proc-title", "Séries temporelles"),
+  p(class = "proc-lead", "Évolution d'un produit par pays. Choisissez le produit, l'indicateur, la fréquence et les pays au-dessus du graphique.",
+    if (length(GEOS) > 1) " Chaque pays a sa couleur."),
+  if (is.na(COLS$geo)) div(class = "warn-box",
+    sprintf("Colonne pays introuvable : aucune colonne ne contient les codes %s. Indiquez-la dans params$geo_col. Colonnes du fichier : %s.",
+            paste(GEO_TOKENS, collapse = ", "), paste(names(raw), collapse = ", "))),
+  if (nrow(ts_m) == 0) div(class = "warn-box", "Aucune donnée à afficher pour cette sélection.") else
+  div(class = "card-box ts-section",
+      div(class = "card-title", "\u2026"),
+      div(class = "filters", prod_filter, flow_filter, ind_filter, freq_filter, if (!is.na(COLS$geo)) geo_filter),
+      if (is.na(COLS$flow)) div(class = "warn-box", style = "margin:6px 0;",
+        sprintf("Colonne import / export introuvable : indiquez-la dans params$flow_col. Colonnes du fichier : %s.",
+                paste(names(raw), collapse = ", "))),
+      div(class = "ts-empty", "Aucune donnée pour cette combinaison produit / indicateur."),
+      div(class = "ts-chart", plot_timeseries()),
+      div(class = "note", sprintf("Annuel = %s des mois de l'année ; les années incomplètes sont signalées au survol.%s",
+                                  if (tolower(params$agg) == "mean") "moyenne" else "somme",
+                                  if (length(OTHER_DIMS) > 0) paste0(" Valeurs agrégées (", params$agg, ") sur : ",
+                                                                     paste(OTHER_DIMS, collapse = ", "), ".") else ""))),
+  h2(class = "proc-title section-title", sprintf("Prix et quantités – %s", PQ_GEO)),
+  p(class = "proc-lead",
+    "Évolution des quantités importées ou exportées face aux fluctuations du prix unitaire, produit par produit. ",
+    "Le nuage de points relie la variation mensuelle du prix à celle de la quantité le même mois ; la pente b mesure leur relation."),
+  pq_section
+)
+
+div(class = "cockpit", sidebar, main)
+```
+
+```{r data-script, results='asis'}
+cat("<script>window.TSDATA = ", as.character(jsonlite::toJSON(TSDATA, auto_unbox = TRUE, na = "null", digits = NA)), ";</script>\n", sep = "")
+```
+
+```{r select-script, results='asis'}
+js <- "
+  var D = window.TSDATA;
+  var root = document.querySelector('.ts-section');       // partie 1 uniquement
+  if (!root || !D) return;
+  var NC = D.geos.length;
+  var dd = root.querySelector('.dd');
+  if (!dd) return;
+
+  function items() { return Array.prototype.slice.call(root.querySelectorAll('.prod-item')); }
+  function active(cls) { var b = root.querySelector('.' + cls + '.active'); return b ? b.dataset.v : null; }
+
+  function update() {
+    var gd = root.querySelector('.ts-chart .js-plotly-plot');
+    if (!window.Plotly || !gd || !gd.data) return setTimeout(update, 200);
+
+    var chk  = root.querySelector('.prod-chk:checked');
+    var prod = chk ? chk.value : null;
+    var lbl  = chk ? chk.closest('.prod-item').dataset.label : 'Choisir un produit';
+    var ind  = active('ind-btn'), fr = active('freq-btn') || 'm', flow = active('flow-btn') || D.flow0;
+    var gBtn = root.querySelectorAll('.geo-btn');
+
+    var xs = [], ys = [], cds = [], vis = [], mx = 0, any = false;
+    var X = fr === 'm' ? D.months : D.years;
+    for (var j = 0; j < NC; j++) {
+      var k = D.geos[j] + '|' + prod + '|' + ind + '|' + flow;
+      var y = (fr === 'm' ? D.m : D.y)[k], nm = D.n[k];
+      var on = (gBtn.length ? gBtn[j].classList.contains('active') : true) && !!y;
+      xs.push(X);
+      ys.push(y || X.map(function () { return null; }));
+      cds.push(X.map(function (_, i) {
+        return (fr === 'y' && nm && nm[i] && nm[i] < 12) ? ' \u00b7 année incomplète (' + nm[i] + ' mois)' : '';
+      }));
+      vis.push(on);
+      if (on) { any = true; y.forEach(function (v) { if (v !== null && Math.abs(v) > mx) mx = Math.abs(v); }); }
+    }
+    var f  = mx >= 1000 ? ',.0f' : ',.2f';
+    var ht = '%{fullData.name}: <b>%{y:' + f + '}</b>%{customdata}<extra></extra>';
+    var idx = []; for (var i = 0; i < NC; i++) idx.push(i);
+
+    Plotly.restyle(gd, { x: xs, y: ys, customdata: cds, visible: vis,
+                         mode: fr === 'y' ? 'lines+markers' : 'lines', hovertemplate: ht }, idx);
+    Plotly.relayout(gd, { 'yaxis.title.text': D.ind[ind] || ind, 'xaxis.hoverformat': fr === 'm' ? '%B %Y' : '%Y',
+                          'xaxis.autorange': true, 'yaxis.autorange': true });
+
+    root.querySelector('.ts-empty').style.display = any ? 'none' : 'block';
+    dd.querySelector('.dd-text').textContent = lbl;
+    root.querySelector('.card-title').textContent = lbl;
+  }
+
+  // Menu déroulant produit : ouverture / fermeture, recherche, choix unique
+  dd.querySelector('.dd-toggle').addEventListener('click', function (e) {
+    e.stopPropagation();
+    dd.classList.toggle('open');
+    if (dd.classList.contains('open')) dd.querySelector('.dd-search').focus();
+  });
+  document.addEventListener('click', function (e) { if (!dd.contains(e.target)) dd.classList.remove('open'); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') dd.classList.remove('open'); });
+  dd.querySelector('.dd-search').addEventListener('input', function () {
+    var q = this.value.toLowerCase().trim();
+    items().forEach(function (it) { it.style.display = (!q || it.dataset.name.indexOf(q) !== -1) ? '' : 'none'; });
+  });
+  root.querySelectorAll('.prod-chk').forEach(function (c) {
+    c.addEventListener('change', function () { update(); dd.classList.remove('open'); });
+  });
+
+  // Indicateur et fréquence : un seul bouton actif
+  ['ind-btn', 'freq-btn', 'flow-btn'].forEach(function (cls) {
+    root.querySelectorAll('.' + cls).forEach(function (b) {
+      b.addEventListener('click', function () {
+        root.querySelectorAll('.' + cls).forEach(function (o) { o.classList.toggle('active', o === b); });
+        update();
+      });
+    });
+  });
+
+  // Pays : LU, BE ou les deux (au moins un reste actif)
+  root.querySelectorAll('.geo-btn').forEach(function (b) {
+    b.addEventListener('click', function () {
+      b.classList.toggle('active');
+      if (!root.querySelector('.geo-btn.active')) b.classList.add('active');
+      update();
+    });
+  });
+
+  update();
+"
+cat("<script>\n(function(){ function go(){", js, "}\nif (document.readyState === 'complete') setTimeout(go, 0); else window.addEventListener('load', function(){ setTimeout(go, 0); }); })();\n</script>\n")
+```
+
+```{r pq-data-script, results='asis'}
+if (PQ_OK) cat("<script>window.PQDATA = ", as.character(jsonlite::toJSON(PQDATA, auto_unbox = TRUE, na = "null", digits = NA)), ";</script>\n", sep = "")
+```
+
+```{r pq-script, results='asis'}
+js_pq <- "
+  var P = window.PQDATA, MIN = __MIN__;
+  var root = document.querySelector('.pq-section');        // partie 2 uniquement
+  if (!root || !P) return;
+  var dd = root.querySelector('.dd');
+  var DIR0 = { label: 1, n: -1, b: 1, ci: 1, r2: -1, pv: 1 };   // sens de tri par défaut de chaque colonne
+  var sort = { k: 'b', dir: 1 };
+
+  function items() { return Array.prototype.slice.call(root.querySelectorAll('.prod-item')); }
+  function arr(v) { return Array.isArray(v) ? v : (v == null ? [] : [v]); }
+  function esc(s) { return String(s).replace(/[&<>\"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;' }[c]; }); }
+  function flow() { var b = root.querySelector('.pq-flow-btn.active'); return b ? b.dataset.v : P.flow0; }
+  function fmt(x, d) {
+    return (x == null || isNaN(x)) ? '\\u2013' : Number(x).toLocaleString('fr-FR', { minimumFractionDigits: d, maximumFractionDigits: d });
+  }
+  function fmtP(p) { return p == null ? '\\u2013' : (p < 0.001 ? '< 0,001' : fmt(p, 3)); }
+  function month(d) { return new Date(d + 'T00:00:00').toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' }); }
+  function est(s) { return (s && s.b != null) ? s : null; }
+
+  function setStat(cls, v) { root.querySelector('.' + cls + ' .v').textContent = v; }
+  function stats(s) {
+    var e = est(s), n = s ? s.n : 0;
+    setStat('st-b',  e ? fmt(e.b, 2) : '\\u2013');
+    setStat('st-n',  fmt(n, 0));
+    setStat('st-ci', e ? '[' + fmt(e.lo, 2) + ' ; ' + fmt(e.hi, 2) + ']' : '\\u2013');
+    setStat('st-r2', e ? fmt(e.r2, 2) : '\\u2013');
+    setStat('st-p',  e ? fmtP(e.pv) : '\\u2013');
+    var t = root.querySelector('.pq-interp');
+    if (!e) {
+      t.className = 'pq-interp muted';
+      t.textContent = 'Pas assez de mois exploitables (' + n + ' < ' + MIN + ') pour estimer la relation.';
+      return;
+    }
+    t.className = 'pq-interp';
+    t.innerHTML = 'Une hausse de 1 % du prix unitaire va de pair, le même mois, avec une variation de <b>' +
+      (e.b >= 0 ? '+' : '') + fmt(e.b, 2) + ' %</b> de la quantité. ' +
+      (e.pv < 0.05 ? 'Relation <b>significative</b> au seuil de 5 %.' : 'Relation <b>non significative</b> au seuil de 5 %.');
+  }
+
+  function renderTable(prod, fl) {
+    var rows = items().map(function (it) {
+      var c = it.querySelector('.pq-chk').value, k = P.k[c + '|' + fl], s = k ? k.s : null;
+      return { code: c, label: it.dataset.label, n: s ? s.n : 0, s: est(s) };
+    });
+    var key = sort.k, dir = sort.dir;
+    function val(r) { return key === 'n' ? r.n : (r.s ? r.s[key === 'ci' ? 'lo' : key] : null); }
+    rows.sort(function (a, b) {
+      if (key === 'label') return dir * a.label.localeCompare(b.label, 'fr');
+      var va = val(a), vb = val(b);
+      if (va == null && vb == null) return a.label.localeCompare(b.label, 'fr');
+      if (va == null) return 1;
+      if (vb == null) return -1;
+      return dir * (va - vb);
+    });
+    root.querySelector('.pq-table tbody').innerHTML = rows.map(function (r) {
+      var s = r.s, sig = s && s.pv < 0.05;
+      return '<tr data-code=\"' + esc(r.code) + '\" class=\"' + (r.code === prod ? 'current' : '') + (s ? '' : ' na') + '\">' +
+        '<td>' + esc(r.label) + '</td>' +
+        '<td class=\"num\">' + fmt(r.n, 0) + '</td>' +
+        '<td class=\"num' + (sig ? ' sig' : '') + '\">' + (s ? fmt(s.b, 2) + (sig ? '<span class=\"sig-dot\"></span>' : '') : 'n < ' + MIN) + '</td>' +
+        '<td class=\"num\">' + (s ? '[' + fmt(s.lo, 2) + ' ; ' + fmt(s.hi, 2) + ']' : '') + '</td>' +
+        '<td class=\"num\">' + (s ? fmt(s.r2, 2) : '') + '</td>' +
+        '<td class=\"num\">' + (s ? fmtP(s.pv) : '') + '</td></tr>';
+    }).join('');
+    root.querySelectorAll('.pq-table th').forEach(function (th) {
+      th.classList.toggle('sorted', th.dataset.k === key);
+      th.classList.toggle('asc', th.dataset.k === key && dir === 1);
+    });
+  }
+
+  function update() {
+    var g1 = root.querySelector('.pq-ts .js-plotly-plot'), g2 = root.querySelector('.pq-sc .js-plotly-plot');
+    if (!window.Plotly || !g1 || !g1.data || !g2 || !g2.data) return setTimeout(update, 200);
+
+    var chk = root.querySelector('.pq-chk:checked'), prod = chk ? chk.value : null;
+    var lbl = chk ? chk.closest('.prod-item').dataset.label : 'Choisir un produit';
+    var fl = flow(), k = P.k[prod + '|' + fl] || null;
+    dd.querySelector('.dd-text').textContent = lbl;
+    root.querySelector('.pq-title').textContent = lbl + ' \\u00b7 ' + (P.flows[fl] || fl);
+
+    var d = k ? arr(k.d) : [], p = k ? arr(k.p) : [], q = k ? arr(k.q) : [], dp = k ? arr(k.dp) : [], dq = k ? arr(k.dq) : [];
+    Plotly.restyle(g1, { x: [d, d], y: [q, p] }, [0, 1]);
+    Plotly.relayout(g1, { 'xaxis.autorange': true, 'yaxis.autorange': true, 'yaxis2.autorange': true });
+
+    var xs = [], ys = [], cd = [];
+    for (var i = 0; i < d.length; i++) {
+      if (dp[i] != null && dq[i] != null) { xs.push(dp[i]); ys.push(dq[i]); cd.push(month(d[i])); }
+    }
+    var e = est(k ? k.s : null), lx = [], ly = [];
+    if (e && xs.length) {
+      var mn = Math.min.apply(null, xs), mx = Math.max.apply(null, xs);
+      lx = [mn, mx]; ly = [e.a + e.b * mn, e.a + e.b * mx];
+    }
+    Plotly.restyle(g2, { x: [xs, lx], y: [ys, ly], customdata: [cd, []] }, [0, 1]);
+    Plotly.relayout(g2, { 'xaxis.autorange': true, 'yaxis.autorange': true });
+
+    stats(k ? k.s : null);
+    root.querySelector('.pq-empty').style.display = (d.length && d[0] != null) ? 'none' : 'block';
+    renderTable(prod, fl);
+  }
+
+  // Menu déroulant produit
+  dd.querySelector('.dd-toggle').addEventListener('click', function (ev) {
+    ev.stopPropagation();
+    dd.classList.toggle('open');
+    if (dd.classList.contains('open')) dd.querySelector('.dd-search').focus();
+  });
+  document.addEventListener('click', function (ev) { if (!dd.contains(ev.target)) dd.classList.remove('open'); });
+  document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') dd.classList.remove('open'); });
+  dd.querySelector('.dd-search').addEventListener('input', function () {
+    var q = this.value.toLowerCase().trim();
+    items().forEach(function (it) { it.style.display = (!q || it.dataset.name.indexOf(q) !== -1) ? '' : 'none'; });
+  });
+  root.querySelectorAll('.pq-chk').forEach(function (c) {
+    c.addEventListener('change', function () { update(); dd.classList.remove('open'); });
+  });
+
+  // Flux : Import ou Export
+  root.querySelectorAll('.pq-flow-btn').forEach(function (b) {
+    b.addEventListener('click', function () {
+      root.querySelectorAll('.pq-flow-btn').forEach(function (o) { o.classList.toggle('active', o === b); });
+      update();
+    });
+  });
+
+  // Tableau : tri par en-tête, clic sur une ligne = afficher le produit
+  root.querySelectorAll('.pq-table th').forEach(function (th) {
+    th.addEventListener('click', function () {
+      var k = th.dataset.k;
+      sort = (sort.k === k) ? { k: k, dir: -sort.dir } : { k: k, dir: DIR0[k] };
+      update();
+    });
+  });
+  root.querySelector('.pq-table tbody').addEventListener('click', function (ev) {
+    var tr = ev.target.closest('tr');
+    if (!tr) return;
+    var code = tr.dataset.code;
+    root.querySelectorAll('.pq-chk').forEach(function (c) { c.checked = (c.value === code); });
+    update();
+    root.querySelector('.pq-title').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+
+  update();
+"
+js_pq <- sub("__MIN__", as.character(PQ_MIN), js_pq, fixed = TRUE)
+if (PQ_OK) cat("<script>\n(function(){ function go(){", js_pq, "}\nif (document.readyState === 'complete') setTimeout(go, 0); else window.addEventListener('load', function(){ setTimeout(go, 0); }); })();\n</script>\n")
+```

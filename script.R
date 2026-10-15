@@ -1,0 +1,157 @@
+
+
+# ---- 0. Packages -------------------------------------------------------------
+pkgs <- c("readxl", "dplyr", "tidyr", "stringr", "purrr")
+
+dossier <- "M:/Knowledge/TF Innovation/Hackhathon 2026/Trade_Hackathon_2026"
+
+fichiers <- list.files(dossier, pattern = "\\.xlsx$", full.names = TRUE)
+fichiers <- fichiers[!startsWith(basename(fichiers), "~$")]
+
+cat("Fichiers à lire :", length(fichiers), "\n")
+print(basename(fichiers))
+
+# ---- 2. Fonctions utilitaires ------------------------------------------------
+# "LIVE ANIMALS [01]" -> code "01" ; libellé "LIVE ANIMALS"
+extraire_code    <- function(x) str_match(x, "\\[([^\\[\\]]*)\\]\\s*$")[, 2]
+extraire_libelle <- function(x) str_trim(str_remove(x, "\\s*\\[[^\\[\\]]*\\]\\s*$"))
+
+# Valeur de métadonnée dans l'en-tête d'un onglet (ex. "PRODUCT [PRODUCT]")
+valeur_meta <- function(raw, cle) {
+  i <- which(raw[[1]] == cle)
+  if (length(i) == 0) return(NA_character_)
+  # la valeur est dans la 1re cellule non vide à droite (cellules fusionnées)
+  v <- unlist(raw[i[1], -1], use.names = FALSE)
+  v <- v[!is.na(v) & v != ""]
+  if (length(v) == 0) NA_character_ else v[1]
+}
+
+# Lecture d'un onglet de données -> format long
+lire_onglet <- function(fichier, nom_onglet) {
+  raw <- read_excel(fichier, sheet = nom_onglet, col_names = FALSE,
+                    col_types = "text", .name_repair = "minimal")
+  names(raw) <- paste0("c", seq_along(raw))
+  
+  freq      <- valeur_meta(raw, "Frequency [FREQ]")
+  reporter  <- valeur_meta(raw, "REPORTER [REPORTER]")
+  product   <- valeur_meta(raw, "PRODUCT [PRODUCT]")
+  flow      <- valeur_meta(raw, "FLOW [FLOW]")
+  indicator <- valeur_meta(raw, "INDICATORS [INDICATORS]")
+  
+  # Ligne "TIME" = années ; données à partir de la ligne après "PARTNER (Codes)"
+  i_time <- which(raw$c1 == "TIME")[1]
+  i_part <- which(raw$c1 == "PARTNER (Codes)")[1]
+  if (is.na(i_time) || is.na(i_part)) {
+    warning("Structure inattendue : ", basename(fichier), " / ", nom_onglet, " (ignoré)")
+    return(NULL)
+  }
+  annees <- unlist(raw[i_time, -(1:2)], use.names = FALSE)
+  col_ok <- which(!is.na(annees) & annees != "") + 2
+  
+  # Fin du bloc : première ligne vide après le début des données
+  debut <- i_part + 1
+  vides <- which(is.na(raw$c1) & seq_len(nrow(raw)) > debut)
+  fin   <- if (length(vides) > 0) vides[1] - 1 else nrow(raw)
+  
+  bloc <- raw[debut:fin, c(1, 2, col_ok)]
+  names(bloc) <- c("PARTNER_CODE", "PARTNER_LABEL", annees[col_ok - 2])
+  
+  bloc |>
+    pivot_longer(-c(PARTNER_CODE, PARTNER_LABEL),
+                 names_to = "TIME", values_to = "VALUE_RAW") |>
+    mutate(
+      SOURCE_FILE    = basename(fichier),
+      SHEET          = nom_onglet,
+      FREQ_CODE      = extraire_code(freq),
+      REPORTER_CODE  = extraire_code(reporter),
+      REPORTER_LABEL = extraire_libelle(reporter),
+      PRODUCT_CODE   = extraire_code(product),
+      PRODUCT_LABEL  = extraire_libelle(product),
+      FLOW_CODE      = extraire_code(flow),
+      FLOW_LABEL     = extraire_libelle(flow),
+      INDICATOR_CODE = extraire_code(indicator),
+      TIME           = as.integer(TIME),
+      # ":" = not available (valeur spéciale Eurostat) -> NA
+      VALUE_IN_EUROS = suppressWarnings(as.numeric(na_if(str_trim(VALUE_RAW), ":")))
+    ) |>
+    select(-VALUE_RAW)
+}
+
+# Lecture du Summary d'un fichier (table de contrôle)
+lire_summary <- function(fichier) {
+  s <- read_excel(fichier, sheet = "Summary", col_names = FALSE,
+                  col_types = "text", .name_repair = "minimal")
+  names(s) <- paste0("c", seq_along(s))
+  i_head <- which(s$c2 == "Contents")[1]
+  s[(i_head + 1):nrow(s), ] |>
+    filter(str_detect(c2, "^Sheet \\d+$")) |>
+    transmute(SOURCE_FILE      = basename(fichier),
+              SHEET            = c2,
+              PRODUCT_CODE_SUM = extraire_code(c5),
+              FLOW_CODE_SUM    = extraire_code(c6))
+}
+
+# Lecture complète d'un fichier : tous ses onglets de données
+lire_fichier <- function(fichier) {
+  message("== Fichier : ", basename(fichier))
+  onglets <- setdiff(excel_sheets(fichier), "Summary")
+  map(onglets, \(o) lire_onglet(fichier, o)) |> list_rbind()
+}
+
+# ---- 3. Consolidation de tous les fichiers ----------------------------------
+consolide   <- map(fichiers, lire_fichier) |> list_rbind()
+summary_tbl <- map(fichiers, lire_summary) |> list_rbind()
+
+# ---- 4. Contrôles ------------------------------------------------------------
+# a) codes des onglets = codes du Summary, fichier par fichier
+controle <- consolide |>
+  distinct(SOURCE_FILE, SHEET, PRODUCT_CODE, FLOW_CODE) |>
+  full_join(summary_tbl, by = c("SOURCE_FILE", "SHEET")) |>
+  filter(is.na(PRODUCT_CODE) | is.na(PRODUCT_CODE_SUM) |
+           PRODUCT_CODE != PRODUCT_CODE_SUM | FLOW_CODE != FLOW_CODE_SUM)
+if (nrow(controle) > 0) {
+  warning("Incohérences entre onglets et Summary :")
+  print(controle)
+} else {
+  cat("Contrôle Summary vs onglets : OK\n")
+}
+
+# b) recouvrements entre fichiers (même reporter/produit/flux/partenaire/année
+#    présent dans plusieurs fichiers, ex. périodes qui se chevauchent)
+cle <- c("REPORTER_CODE", "PRODUCT_CODE", "FLOW_CODE", "PARTNER_CODE", "TIME")
+doublons <- consolide |>
+  count(across(all_of(cle)), name = "n") |>
+  filter(n > 1)
+cat("Clés en doublon entre fichiers :", nrow(doublons), "\n")
+
+# ---- 5. Data.frame final -----------------------------------------------------
+dataset <- consolide |>
+  select(SOURCE_FILE, FREQ_CODE, REPORTER_CODE, REPORTER_LABEL,
+         PRODUCT_CODE, PRODUCT_LABEL, FLOW_CODE, FLOW_LABEL,
+         PARTNER_CODE, PARTNER_LABEL, TIME, INDICATOR_CODE,
+         VALUE_IN_EUROS, SHEET) |>
+  arrange(REPORTER_CODE, PRODUCT_CODE, FLOW_CODE, PARTNER_CODE, TIME) |>
+  as.data.frame()
+
+cat("Lignes totales     :", nrow(dataset), "\n")
+cat("Lignes avec valeur :", sum(!is.na(dataset$VALUE_IN_EUROS)), "\n")
+print(table(dataset$SOURCE_FILE))
+
+# Pour ne garder que les valeurs disponibles (sans les ":") :
+dataset <- dataset[!is.na(dataset$VALUE_IN_EUROS), ]
+
+final_df <- dataset %>%
+  select(PRODUCT_CODE, PRODUCT_LABEL, FLOW_CODE,
+         FLOW_LABEL, PARTNER_CODE, PARTNER_LABEL, TIME, INDICATOR_CODE, VALUE_IN_EUROS)
+
+saveRDS(final_df, "final_df.rds") 
+
+
+
+
+
+
+
+#appel rmarkdown
+
+rmarkdown::render("trade_cockpit_LU_V11.Rmd", envir = globalenv())
