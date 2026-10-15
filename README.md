@@ -51,14 +51,14 @@ The page covers **all years available** (1999 to the latest year in the data). T
 1. Clone or download this repository (all files stay together in one folder).
 2. Open Trade_Hackathon_2026.Rproj in RStudio: this makes the repository folder the working directory,
    so the data files are found by their name.
-3. Open trade_cockpit_LU_V13.Rmd and press  Knit.
+3. Open Dashboard_Hackathon_2026.Rmd and press  Knit.
 ```
 
 Or from the R console, from the repository folder:
 
 ```r
-rmarkdown::render("trade_cockpit_LU_V13.Rmd")                                  # year 2025 (default)
-rmarkdown::render("trade_cockpit_LU_V13.Rmd", params = list(year = 2019),
+rmarkdown::render("Dashboard_Hackathon_2026.Rmd")                                  # year 2025 (default)
+rmarkdown::render("Dashboard_Hackathon_2026.Rmd", params = list(year = 2019),
                   output_file = "trade_cockpit_LU_2019.html")
 ```
 
@@ -79,7 +79,7 @@ Hackathon-2026-Trade/
 ├── Trade_Hackathon_2026.Rproj       RStudio project: open it first
 │
 │   The page
-├── trade_cockpit_LU_V13.Rmd         ALL the code: data preparation, charts, page layout, interactivity (current version)
+├── Dashboard_Hackathon_2026.Rmd         ALL the code: data preparation, charts, page layout, interactivity (current version)
 ├── trade_cockpit_LU_V13.html        the knitted page, ready to open
 ├── trade_cockpit_LU_V12.Rmd         previous version (same page without the 4-digit drill-down), kept for reference
 ├── trade_cockpit_LU_V12.html        its knitted page
@@ -105,25 +105,12 @@ Hackathon-2026-Trade/
 
 Everything the page needs is in **one** `.Rmd` file, on purpose: copy the file, add the data, knit. The file is organised in named chunks:
 
-| Chunk | Role |
-|---|---|
-| `setup` | packages, colours, constants |
-| `load-data` | reads `final_df.rds` (or a `final_df` already in memory), keeps the partner countries, builds the tables by product × flow × partner |
-| `helpers`, `kpis` | formatting functions, key figures |
-| `widgets` | the plotly charts of the Overview, Product and Country views |
-| `twins-data` | the Trade twins computations (needs `eu27_df.rds`) |
-| `summary` | the Summary view: top 5, balance, dependence, neighbours |
-| `hs4-drill` | the drill-down of the top 5: reads `2025_4digits.json` and prepares, for each family, its 4-digit lines |
-| `cockpit` | the HTML layout: sidebar, tabs, cards |
-| `kpi-json`, `hs4-drill-js` + the final `<script>` | the data stored in the page and the JavaScript that switches the charts when you use the controls |
-
----
 
 ## 4. Data
 
 All data come from **Eurostat Comext**, dataset **[ds-045409] EU trade since 1988 by HS2-4-6 and CN8**, indicator *VALUE_IN_EUROS*, annual frequency. Source: Eurostat, © European Union — free reuse allowed provided the source is acknowledged ([Eurostat copyright notice](https://ec.europa.eu/eurostat/en/help/copyright-notice)). Extraction date: 14 October 2026.
 
-Products are **HS2 chapters**: the goods are grouped into 97 families following the international customs classification (Harmonized System, 2-digit level): 87 = vehicles, 84 = machinery, 30 = pharmaceuticals, 27 = mineral fuels, and so on. `TOTAL` = all products.
+Products are **HS2 chapters** and **HS4 chapters**: the goods are grouped into 97 families following the international customs classification (Harmonized System, 2-digit level): 87 = vehicles, 84 = machinery, 30 = pharmaceuticals, 27 = mineral fuels, and so on. `TOTAL` = all products.
 
 ### 4.1 `final_df.rds` — required
 
@@ -136,24 +123,7 @@ Products are **HS2 chapters**: the goods are grouped into 97 families following 
 
 It is built by `script.R` from the three Excel files below (section 4.2). The `.Rmd` reads it with `readRDS()`; if a `final_df` table is already in memory (for instance right after running `script.R`), it uses that one instead.
 
-### 4.2 `2_digits_1999-2004_LU.xlsx`, `2_digits_2005-2014_LU.xlsx`, `2_digits_2015-2025_LU.xlsx` — the raw downloads
-
-The Eurostat downloads, kept as they are so that `final_df.rds` can be rebuilt or checked. Each file is the same selection as above for one period (the period is split in three to keep each download small). Each workbook has a `Summary` sheet listing its contents and **one sheet per product family and flow** (about 200 sheets), with the partner countries in rows and the years in columns. A `:` cell means "not available".
-
-How to rebuild `final_df.rds`:
-
-```text
-1. In script.R, set  dossier <-  to the folder that holds the three Excel files
-   (the script reads every .xlsx in that folder, so keep code_agg.xlsx out of it or move the
-   three downloads to a folder of their own).
-2. Run the script. It reads all the sheets, checks them against the Summary sheets, looks for
-   overlaps between files, drops the ":" cells and writes final_df.rds.
-3. Its last line knits the page: point it to trade_cockpit_LU_V13.Rmd (or delete that line).
-```
-
-To get a newer download: open the [Eurostat Data Browser](https://ec.europa.eu/eurostat/databrowser/view/ds-045409/default/table), select reporter = Luxembourg, all partners, products `TOTAL` + HS2 chapters, both flows, indicator VALUE_IN_EUROS, the years you want, and download as Excel.
-
-### 4.3 `eu27_df.rds` — for the Trade twins view
+### 4.2 `eu27_df.rds` — for the Trade twins view
 
 | | |
 |---|---|
@@ -163,17 +133,15 @@ To get a newer download: open the [Eurostat Data Browser](https://ec.europa.eu/e
 
 Same Comext dataset, same selection, with the reporter changed. To rebuild or extend it, download that selection for each country and bind the tables, keeping the same column names. Without this file the page still knits; the Trade twins view shows a notice instead of the charts.
 
-### 4.4 `code_agg.xlsx` — for the "Regions" of the Country view
+### 4.3 `code_agg.xlsx` — for the "Regions" of the Country view
 
 Eurostat's list of **partner aggregates** (EU27, euro area, EFTA, Asia, Africa, OPEC…): one sheet with the columns `CODE`, `Label - English` and `Note (EN only)`, where the note lists the member countries of each aggregate (for example *"This aggregate covers following countries: BE, BG, CZ, …"*). It comes from the Comext metadata of the *PARTNER* dimension (the GEO list). The `.Rmd` reads the three columns by their first word (`code`, `label`, `note`) and turns each note into a list of country codes. Without this file the page still knits; the Country view offers countries only.
 
-`geo_aggregates.R` is the exploratory script that was used to check this parsing (one row per aggregate × member country). It reads the original Eurostat `GEO.xlsx`, which is not in the repository; it is not needed to knit the page.
-
-### 4.5 `2025_4digits.json` — a finer look at 2025, for the Summary drill-down
+### 4.4 `2025_4digits.json` — a finer look at 2025, for the Summary drill-down
 
 The cockpit works with **97 product families** (HS2). This file goes one level deeper: the same goods split into about **1 370 sub-families** (HS4, 4-digit codes). For example family 87 *Vehicles* becomes 8703 *Cars*, 8708 *Car parts*, 8711 *Motorcycles*, and so on.
 
-It is the **raw answer of the Eurostat API**, saved as is, for one selection only: reporter = Luxembourg, partner = World, year = **2025**, imports and exports, value in euros (and quantity in 100 kg).
+It is the **raw answer of the Eurostat API**, saved as is, for one selection only: reporter = Luxembourg, partner = World, year = **2025**, imports and exports, value in euros.
 
 The Summary view uses it for the **drill-down of the top 5**: click a family in the top 5 chart and the page shows the sub-families that make it up (those weighing at least 1 % of the family, 8 at most — parameter `hs4_n` — the rest folded into "Other"); a *Back* button returns to the top 5. Only the year of the file is covered: for another year, download the same selection for that year and set `hs4_path`. With `hs4_path = ""`, or if the file is missing, the page knits without the drill-down.
 
@@ -196,7 +164,7 @@ df$flow <- ifelse(df$flow == "1", "IMPORT", "EXPORT")
 
 `df` then has one row per sub-family and flow (about 2 400 rows): `product` (4-digit code), `product_label`, `flow`, `time`, `value` in euros. In 2025 the largest lines are 8703 *Cars* (imports), 2710 *Petroleum oils* (imports), 8517 *Telephones and network equipment* (both flows) and 7216 *Steel sections* (exports).
 
-### 4.6 What is dropped on purpose
+### 4.5 What is dropped on purpose
 
 * Partner codes that are not countries (stores and provisions, confidential trade, "not specified"…) are excluded from the charts. The sidebar lists them under *non-country codes excluded*.
 * Chapter 99 (goods not classified elsewhere) is left out of the Summary top 5 and of the Trade twins (parameter `excluded_products`).
@@ -208,7 +176,7 @@ df$flow <- ifelse(df$flow == "1", "IMPORT", "EXPORT")
 
 The whole analysis runs **once, when you knit**. R computes every table for every product × flow (and, for the twins, every year) and stores them in the HTML as JSON. A small JavaScript, written at the end of the `.Rmd`, then **swaps the data of the plotly charts** when you use the menu, the product list, the year slider, click a country on the map or a family in the top 5. This is why the page is a plain file that works without R, Shiny or a server.
 
-Libraries: [plotly](https://plotly.com/r/) for the charts, [crosstalk](https://rstudio.github.io/crosstalk/) for the link between the map and the "annual evolution" chart, [bslib](https://rstudio.github.io/bslib/) for the Bootstrap 5 theme, [DT](https://rstudio.github.io/DT/) for tables, the [tidyverse](https://www.tidyverse.org/) for the data work.
+Libraries: [plotly](https://plotly.com/r/) for the charts, [crosstalk](https://rstudio.github.io/crosstalk/) for the link between the map and the "annual evolution" chart, [bslib](https://rstudio.github.io/bslib/) for the Bootstrap 5 theme, the [tidyverse](https://www.tidyverse.org/) for the data work.
 
 Only two things are loaded from the internet when the page is opened: the *Poppins* font (Google Fonts) and the world map outlines (plotly CDN). Without internet the page still works, with the default font and without the map backgrounds. To knit a fully offline page, host the topojson files yourself and set `params$topojson_url`.
 
@@ -246,7 +214,7 @@ Everything adjustable is in the `params` block at the top of the `.Rmd`:
 You can set them without editing the file:
 
 ```r
-rmarkdown::render("trade_cockpit_LU_V13.Rmd",
+rmarkdown::render("Dashboard_Hackathon_2026.Rmd",
                   params = list(year = 2023, neighbours = c("BE", "FR", "DE")))
 ```
 
@@ -258,21 +226,19 @@ rmarkdown::render("trade_cockpit_LU_V13.Rmd",
 
 ## 8. Known limits
 
-* The last year in the data is partial until Eurostat publishes December.
 * HS2 is the product level of all the views. The only finer detail is the drill-down of the Summary top 5 (4 digits, one year). The Comext dataset also has HS6 and CN8.
-* The HTML is about 22 MB because all the combinations are stored in it. It opens in a second from disk; sending it by e-mail may need a zip.
 * Monthly data (seasonality) are not covered.
 * Figures are declared by Luxembourg. The same flow declared by the partner country can differ a little (transport costs, timing, goods routed through a third country).
 
 ---
 
-## 9. Team
+## 9. Our pluridisciplinary Team
 
 **Dat'Artemis** — Artemis Information Management, Luxembourg
 
 Quentin Barthel · Quentin Schmidt · Kevin Alati · Sandrine Herbeth · Mathieu Scheffer
 
-Questions and suggestions: open an issue on this repository.
+For questions and suggestions: please open an issue on this repository.
 
 ---
 
@@ -335,14 +301,14 @@ La page couvre **toutes les années disponibles** (1999 jusqu'à la dernière an
 1. Cloner ou télécharger ce dépôt (tous les fichiers restent ensemble dans un seul dossier).
 2. Ouvrir Trade_Hackathon_2026.Rproj dans RStudio : le dossier du dépôt devient le répertoire de
    travail, et les fichiers de données sont trouvés par leur nom.
-3. Ouvrir trade_cockpit_LU_V13.Rmd et cliquer sur  Knit.
+3. Ouvrir Dashboard_Hackathon_2026.Rmd et cliquer sur  Knit.
 ```
 
 Ou depuis la console R, dans le dossier du dépôt :
 
 ```r
-rmarkdown::render("trade_cockpit_LU_V13.Rmd")                                  # année 2025 (par défaut)
-rmarkdown::render("trade_cockpit_LU_V13.Rmd", params = list(year = 2019),
+rmarkdown::render("Dashboard_Hackathon_2026.Rmd")                                  # année 2025 (par défaut)
+rmarkdown::render("Dashboard_Hackathon_2026.Rmd", params = list(year = 2019),
                   output_file = "trade_cockpit_LU_2019.html")
 ```
 
@@ -363,7 +329,7 @@ Hackathon-2026-Trade/
 ├── Trade_Hackathon_2026.Rproj       projet RStudio : à ouvrir en premier
 │
 │   La page
-├── trade_cockpit_LU_V13.Rmd         TOUT le code : préparation des données, graphiques, mise en page, interactivité (version actuelle)
+├── Dashboard_Hackathon_2026.Rmd         TOUT le code : préparation des données, graphiques, mise en page, interactivité (version actuelle)
 ├── trade_cockpit_LU_V13.html        la page produite, prête à ouvrir
 ├── trade_cockpit_LU_V12.Rmd         version précédente (même page sans le zoom à 4 chiffres), gardée pour mémoire
 ├── trade_cockpit_LU_V12.html        sa page produite
@@ -389,25 +355,12 @@ Hackathon-2026-Trade/
 
 Tout ce dont la page a besoin tient dans **un seul** fichier `.Rmd`, volontairement : on copie le fichier, on ajoute les données, on knit. Le fichier est organisé en blocs nommés :
 
-| Bloc | Rôle |
-|---|---|
-| `setup` | packages, couleurs, constantes |
-| `load-data` | lit `final_df.rds` (ou un `final_df` déjà en mémoire), garde les pays partenaires, construit les tables produit × flux × partenaire |
-| `helpers`, `kpis` | fonctions de mise en forme, chiffres clés |
-| `widgets` | les graphiques plotly des vues Overview, Product et Country |
-| `twins-data` | les calculs des Trade twins (a besoin de `eu27_df.rds`) |
-| `summary` | la vue Summary : top 5, balance, dépendance, voisins |
-| `hs4-drill` | le zoom du top 5 : lit `2025_4digits.json` et prépare, pour chaque famille, ses lignes à 4 chiffres |
-| `cockpit` | la mise en page HTML : menu latéral, onglets, cartes |
-| `kpi-json`, `hs4-drill-js` + le `<script>` final | les données stockées dans la page et le JavaScript qui change les graphiques quand on utilise les commandes |
-
----
 
 ## 4. Données
 
 Toutes les données viennent d'**Eurostat Comext**, jeu de données **[ds-045409] EU trade since 1988 by HS2-4-6 and CN8**, indicateur *VALUE_IN_EUROS*, fréquence annuelle. Source : Eurostat, © Union européenne — réutilisation libre à condition de citer la source ([avis de droit d'auteur Eurostat](https://ec.europa.eu/eurostat/en/help/copyright-notice)). Date d'extraction : 14 octobre 2026.
 
-Les produits sont des **chapitres HS2** : les marchandises sont regroupées en 97 familles selon la nomenclature douanière internationale (Système harmonisé, niveau à 2 chiffres) : 87 = véhicules, 84 = machines, 30 = produits pharmaceutiques, 27 = combustibles minéraux, etc. `TOTAL` = tous les produits.
+Les produits sont des **chapitres HS2** et **chapitres HS4** : les marchandises sont regroupées en 97 familles selon la nomenclature douanière internationale (Système harmonisé, niveau à 2 chiffres) : 87 = véhicules, 84 = machines, 30 = produits pharmaceutiques, 27 = combustibles minéraux, etc. `TOTAL` = tous les produits.
 
 ### 4.1 `final_df.rds` — obligatoire
 
@@ -420,24 +373,7 @@ Les produits sont des **chapitres HS2** : les marchandises sont regroupées en 9
 
 Il est construit par `script.R` à partir des trois fichiers Excel ci-dessous (section 4.2). Le `.Rmd` le lit avec `readRDS()` ; si une table `final_df` est déjà en mémoire (par exemple juste après avoir lancé `script.R`), il utilise celle-là.
 
-### 4.2 `2_digits_1999-2004_LU.xlsx`, `2_digits_2005-2014_LU.xlsx`, `2_digits_2015-2025_LU.xlsx` — les téléchargements bruts
-
-Les téléchargements Eurostat, gardés tels quels pour pouvoir reconstruire ou vérifier `final_df.rds`. Chaque fichier contient la même sélection que ci-dessus pour une période (la période est coupée en trois pour que chaque téléchargement reste petit). Chaque classeur a une feuille `Summary` qui liste son contenu et **une feuille par famille de produits et par flux** (environ 200 feuilles), avec les pays partenaires en lignes et les années en colonnes. Une cellule `:` veut dire « non disponible ».
-
-Pour reconstruire `final_df.rds` :
-
-```text
-1. Dans script.R, donner à  dossier <-  le dossier qui contient les trois fichiers Excel
-   (le script lit tous les .xlsx de ce dossier : garder code_agg.xlsx à l'écart, ou mettre
-   les trois téléchargements dans un dossier à eux).
-2. Lancer le script. Il lit toutes les feuilles, les compare aux feuilles Summary, cherche
-   les recouvrements entre fichiers, écarte les cellules ":" et écrit final_df.rds.
-3. Sa dernière ligne knitte la page : la faire pointer vers trade_cockpit_LU_V13.Rmd (ou la supprimer).
-```
-
-Pour un téléchargement plus récent : ouvrir le [Data Browser d'Eurostat](https://ec.europa.eu/eurostat/databrowser/view/ds-045409/default/table), choisir déclarant = Luxembourg, tous les partenaires, produits `TOTAL` + chapitres HS2, les deux flux, indicateur VALUE_IN_EUROS, les années voulues, et télécharger en Excel.
-
-### 4.3 `eu27_df.rds` — pour la vue Trade twins
+### 4.2 `eu27_df.rds` — pour la vue Trade twins
 
 | | |
 |---|---|
@@ -447,17 +383,15 @@ Pour un téléchargement plus récent : ouvrir le [Data Browser d'Eurostat](http
 
 Même jeu Comext, même sélection, en changeant le déclarant. Pour le reconstruire ou l'étendre, télécharger cette sélection pour chaque pays et empiler les tables, en gardant les mêmes noms de colonnes. Sans ce fichier la page se génère quand même ; la vue Trade twins affiche un message à la place des graphiques.
 
-### 4.4 `code_agg.xlsx` — pour les « Regions » de la vue Country
+### 4.3 `code_agg.xlsx` — pour les « Regions » de la vue Country
 
 La liste Eurostat des **agrégats de partenaires** (UE27, zone euro, AELE, Asie, Afrique, OPEP…) : une feuille avec les colonnes `CODE`, `Label - English` et `Note (EN only)`, où la note donne les pays membres de chaque agrégat (par exemple *« This aggregate covers following countries: BE, BG, CZ, … »*). Elle vient des métadonnées Comext de la dimension *PARTNER* (la liste GEO). Le `.Rmd` reconnaît les trois colonnes par leur premier mot (`code`, `label`, `note`) et transforme chaque note en liste de codes pays. Sans ce fichier la page se génère quand même ; la vue Country ne propose que des pays.
 
-`geo_aggregates.R` est le script d'exploration qui a servi à vérifier ce découpage (une ligne par agrégat × pays membre). Il lit le `GEO.xlsx` d'origine d'Eurostat, qui n'est pas dans le dépôt ; il n'est pas nécessaire pour knitter la page.
-
-### 4.5 `2025_4digits.json` — un regard plus fin sur 2025, pour le zoom de la vue Summary
+### 4.4 `2025_4digits.json` — un regard plus fin sur 2025, pour le zoom de la vue Summary
 
 Le cockpit travaille avec **97 familles de produits** (HS2). Ce fichier descend d'un niveau : les mêmes marchandises découpées en environ **1 370 sous-familles** (HS4, codes à 4 chiffres). Par exemple, la famille 87 *Véhicules* devient 8703 *Voitures*, 8708 *Pièces de voitures*, 8711 *Motos*, etc.
 
-C'est la **réponse brute de l'API Eurostat**, enregistrée telle quelle, pour une seule sélection : déclarant = Luxembourg, partenaire = Monde, année = **2025**, imports et exports, valeur en euros (et quantité en 100 kg).
+C'est la **réponse brute de l'API Eurostat**, enregistrée telle quelle, pour une seule sélection : déclarant = Luxembourg, partenaire = Monde, année = **2025**, imports et exports, valeur en euros.
 
 La vue Summary s'en sert pour le **zoom du top 5** : on clique une famille dans le graphique du top 5 et la page montre les sous-familles qui la composent (celles qui pèsent au moins 1 % de la famille, 8 au plus — paramètre `hs4_n` — le reste regroupé dans « Other ») ; un bouton *Back* ramène au top 5. Seule l'année du fichier est couverte : pour une autre année, télécharger la même sélection pour cette année et renseigner `hs4_path`. Avec `hs4_path = ""`, ou si le fichier manque, la page se génère sans le zoom.
 
@@ -480,11 +414,10 @@ df$flow <- ifelse(df$flow == "1", "IMPORT", "EXPORT")
 
 `df` contient alors une ligne par sous-famille et par flux (environ 2 400 lignes) : `product` (code à 4 chiffres), `product_label`, `flow`, `time`, `value` en euros. En 2025, les plus grosses lignes sont 8703 *Voitures* (imports), 2710 *Huiles de pétrole* (imports), 8517 *Téléphones et équipements réseau* (les deux flux) et 7216 *Profilés en acier* (exports).
 
-### 4.6 Ce qui est écarté volontairement
+### 4.5 Ce qui est écarté volontairement
 
 * Les codes partenaires qui ne sont pas des pays (avitaillement, commerce confidentiel, « non précisé »…) sont exclus des graphiques. Le menu latéral les liste sous *non-country codes excluded*.
 * Le chapitre 99 (marchandises non classées ailleurs) est laissé hors du top 5 de la vue Summary et des Trade twins (paramètre `excluded_products`).
-* La dernière année est en général **incomplète** (données jusqu'au dernier mois publié par Eurostat).
 
 ---
 
@@ -530,7 +463,7 @@ Tout ce qui se règle est dans le bloc `params` en tête du `.Rmd` :
 On peut les changer sans modifier le fichier :
 
 ```r
-rmarkdown::render("trade_cockpit_LU_V13.Rmd",
+rmarkdown::render("Dashboard_Hackathon_2026.Rmd",
                   params = list(year = 2023, neighbours = c("BE", "FR", "DE")))
 ```
 
@@ -550,7 +483,7 @@ rmarkdown::render("trade_cockpit_LU_V13.Rmd",
 
 ---
 
-## 9. Équipe
+## 9. Notre équipe pluridisciplinaire
 
 **Dat'Artemis** — Artemis Information Management, Luxembourg
 
