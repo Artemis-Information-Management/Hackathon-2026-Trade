@@ -1,2 +1,7 @@
 
 MS/data/
+
+.Rproj.user/
+.RData
+.RDataTmp
+.Rhistory
