@@ -92,8 +92,9 @@ Hackathon-2026-Trade/
 
 `.Rproj.user`, `.RDataTmp` and `.Rhistory` are RStudio working files; they can be ignored.
 
-Everything the page needs is in **one** `.Rmd` file, on purpose: copy the file, add the data, knit. The file is organised in named chunks:
+Everything the page needs is in **one** `.Rmd` file, on purpose: copy the file, add the data, knit.
 
+---
 
 ## 4. Data
 
@@ -110,7 +111,7 @@ Products are **HS2 chapters** and **HS4 chapters**: the goods are grouped into 9
 | Columns used by the page | `PRODUCT_CODE`, `PRODUCT_LABEL`, `FLOW_LABEL` (IMPORT / EXPORT), `PARTNER_CODE`, `PARTNER_LABEL`, `TIME` (year), `VALUE_IN_EUROS` |
 | Other columns (ignored) | `FLOW_CODE`, `INDICATOR_CODE` |
 
-It is built by `script.R` from the three Excel files below (section 4.2). The `.Rmd` reads it with `readRDS()`; if a `final_df` table is already in memory (for instance right after running `script.R`), it uses that one instead.
+It is built by `final_df.R` (run by `Create_database_and_HTML_output.R`). The `.Rmd` reads it with `readRDS()`; if a `final_df` table is already in memory (for instance right after running `final_df.R`), it uses that one instead.
 
 ### 4.2 `eu27_df.rds` — for the Trade twins view
 
@@ -120,7 +121,7 @@ It is built by `script.R` from the three Excel files below (section 4.2). The `.
 | Size | 136 775 rows |
 | Columns | the same as `final_df.rds` plus `REPORTER_CODE` and `REPORTER_LABEL` |
 
-Same Comext dataset, same selection, with the reporter changed. To rebuild or extend it, download that selection for each country and bind the tables, keeping the same column names. Without this file the page still knits; the Trade twins view shows a notice instead of the charts.
+Same Comext dataset, same selection, with the reporter changed. It is built by `eu27_df.R` (run by `Create_database_and_HTML_output.R`), which binds the tables of the 26 countries with the same column names. Without this file the page still knits; the Trade twins view shows a notice instead of the charts.
 
 ### 4.3 `code_agg.xlsx` — for the "Regions" of the Country view
 
@@ -207,9 +208,9 @@ rmarkdown::render("Dashboard_Hackathon_2026.Rmd",
                   params = list(year = 2023, neighbours = c("BE", "FR", "DE")))
 ```
 
-**Another country.** Download the same Comext selection for that reporter, run `script.R` to get its `final_df.rds`, set `reporter`, `reporter_code_twins` and `neighbours`, and knit. The code never assumes Luxembourg except through these parameters. For the Trade twins, `eu27_df.rds` must contain the *other* countries: remove the new country from it and add Luxembourg if you want it among the twins.
+**Another country.** Run `final_df.R` with that reporter to get its `final_df.rds`, set `reporter`, `reporter_code_twins` and `neighbours`, and knit. The code never assumes Luxembourg except through these parameters. For the Trade twins, `eu27_df.rds` must contain the *other* countries: remove the new country from it and add Luxembourg if you want it among the twins.
 
-**A newer year.** Download the latest period again (section 4.2), re-run `script.R`, set `year`, knit. For the drill-down, also download the 4-digit file of the new year and set `hs4_path`.
+**A newer year.** Re-run `final_df.R` and `eu27_df.R` (or `Create_database_and_HTML_output.R`, which runs both) to refresh the data files, set `year`, knit. For the drill-down, also download the 4-digit file of the new year and set `hs4_path`.
 
 ---
 
@@ -241,7 +242,7 @@ For questions and suggestions: please open an issue on this repository.
 ---
 
 <a id="trade-cockpit--luxembourg-fr"></a>
-# Trade Cockpit · Luxembourg (FR)
+# Trade Hackathon 2026 · Luxembourg (FR)
 
 **Tableau de bord interactif du commerce extérieur de biens du Luxembourg** : avec qui le Luxembourg échange, ce qu'il achète et ce qu'il vend, comment cela évolue dans le temps, et quels pays de l'UE ont un profil commercial proche du sien.
 
@@ -314,36 +315,28 @@ Tous les fichiers sont à la racine du dépôt, les uns à côté des autres, po
 ```text
 Hackathon-2026-Trade/
 ├── README.md                        ce fichier (EN + FR)
-├── LICENSE                          EUPL-1.2
 ├── Trade_Hackathon_2026.Rproj       projet RStudio : à ouvrir en premier
 │
 │   La page
 ├── Dashboard_Hackathon_2026.Rmd         TOUT le code : préparation des données, graphiques, mise en page, interactivité (version actuelle)
 ├── Dashboard_Hackathon_2026.html        la page produite, prête à ouvrir
-├── Dashboard_Hackathon_LU_V12.Rmd         version précédente (même page sans le zoom à 4 chiffres), gardée pour mémoire
-├── Dashboard_Hackathon_LU_V12.html        sa page produite
 │
-│   Les données (section 4)
-├── final_df.rds                     Luxembourg × tous les pays partenaires, 1999–2025 (obligatoire)
-├── eu27_df.rds                      les 26 autres pays de l'UE × Monde (vue Trade twins ; facultatif)
-├── code_agg.xlsx                    liste Eurostat des agrégats de partenaires = les « Regions » (facultatif)
-├── 2025_4digits.json                détail produit à 4 chiffres pour 2025 (zoom de la vue Summary ; facultatif)
-├── 2_digits_1999-2004_LU.xlsx       téléchargements Eurostat bruts à partir desquels final_df.rds est construit
-├── 2_digits_2005-2014_LU.xlsx
-├── 2_digits_2015-2025_LU.xlsx
+│   Les données
+├── final_df.rds                     Luxembourg × tous les pays partenaires, 1999–2025
+├── eu27_df.rds                      les 26 autres pays de l'UE × Monde (vue Trade twins)
+├── code_agg.xlsx                    liste Eurostat des agrégats de partenaires = les « Regions »
+├── 2025_4digits.json                détail produit à 4 chiffres pour 2025 (zoom de la vue Summary)
 │
-│   Scripts d'appoint
-├── script.R                         construit final_df.rds à partir des trois fichiers Excel
-├── geo_aggregates.R                 lit la liste GEO d'Eurostat et éclate chaque agrégat en pays
-│
-└── docs/
-    └── screenshots/                 images utilisées dans ce README
+│   Scripts
+├── Create_database_and_HTML_output.R                         appelle eu27_df.R et final_df.R pour construire les bases de données et le R Markdown.
+
 ```
 
 `.Rproj.user`, `.RDataTmp` et `.Rhistory` sont des fichiers de travail de RStudio ; on peut les ignorer.
 
-Tout ce dont la page a besoin tient dans **un seul** fichier `.Rmd`, volontairement : on copie le fichier, on ajoute les données, on knit. Le fichier est organisé en blocs nommés :
+Tout ce dont la page a besoin tient dans **un seul** fichier `.Rmd`, volontairement : on copie le fichier, on ajoute les données, on knit.
 
+---
 
 ## 4. Données
 
@@ -360,7 +353,7 @@ Les produits sont des **chapitres HS2** et **chapitres HS4** : les marchandises 
 | Colonnes utilisées par la page | `PRODUCT_CODE`, `PRODUCT_LABEL`, `FLOW_LABEL` (IMPORT / EXPORT), `PARTNER_CODE`, `PARTNER_LABEL`, `TIME` (année), `VALUE_IN_EUROS` |
 | Autres colonnes (ignorées) | `FLOW_CODE`, `INDICATOR_CODE` |
 
-Il est construit par `script.R` à partir des trois fichiers Excel ci-dessous (section 4.2). Le `.Rmd` le lit avec `readRDS()` ; si une table `final_df` est déjà en mémoire (par exemple juste après avoir lancé `script.R`), il utilise celle-là.
+Il est construit par `final_df.R` (lancé par `Create_database_and_HTML_output.R`). Le `.Rmd` le lit avec `readRDS()` ; si une table `final_df` est déjà en mémoire (par exemple juste après avoir lancé `final_df.R`), il utilise celle-là.
 
 ### 4.2 `eu27_df.rds` — pour la vue Trade twins
 
@@ -370,7 +363,7 @@ Il est construit par `script.R` à partir des trois fichiers Excel ci-dessous (s
 | Taille | 136 775 lignes |
 | Colonnes | les mêmes que `final_df.rds` plus `REPORTER_CODE` et `REPORTER_LABEL` |
 
-Même jeu Comext, même sélection, en changeant le déclarant. Pour le reconstruire ou l'étendre, télécharger cette sélection pour chaque pays et empiler les tables, en gardant les mêmes noms de colonnes. Sans ce fichier la page se génère quand même ; la vue Trade twins affiche un message à la place des graphiques.
+Même jeu Comext, même sélection, en changeant le déclarant. Il est construit par `eu27_df.R` (lancé par `Create_database_and_HTML_output.R`), qui empile les tables des 26 pays avec les mêmes noms de colonnes. Sans ce fichier la page se génère quand même ; la vue Trade twins affiche un message à la place des graphiques.
 
 ### 4.3 `code_agg.xlsx` — pour les « Regions » de la vue Country
 
@@ -407,6 +400,7 @@ df$flow <- ifelse(df$flow == "1", "IMPORT", "EXPORT")
 
 * Les codes partenaires qui ne sont pas des pays (avitaillement, commerce confidentiel, « non précisé »…) sont exclus des graphiques. Le menu latéral les liste sous *non-country codes excluded*.
 * Le chapitre 99 (marchandises non classées ailleurs) est laissé hors du top 5 de la vue Summary et des Trade twins (paramètre `excluded_products`).
+* La dernière année est généralement **incomplète** (données jusqu'au dernier mois publié par Eurostat).
 
 ---
 
@@ -414,7 +408,7 @@ df$flow <- ifelse(df$flow == "1", "IMPORT", "EXPORT")
 
 Toute l'analyse tourne **une seule fois, au moment du knit**. R calcule chaque table pour chaque produit × flux (et, pour les twins, chaque année) et les range dans le HTML au format JSON. Un petit JavaScript, écrit à la fin du `.Rmd`, **échange ensuite les données des graphiques plotly** quand on utilise le menu, la liste des produits, le curseur d'année, quand on clique un pays sur la carte ou une famille dans le top 5. C'est pour cela que la page est un simple fichier qui fonctionne sans R, sans Shiny et sans serveur.
 
-Bibliothèques : [plotly](https://plotly.com/r/) pour les graphiques, [crosstalk](https://rstudio.github.io/crosstalk/) pour le lien entre la carte et le graphique « évolution annuelle », [bslib](https://rstudio.github.io/bslib/) pour le thème Bootstrap 5, [DT](https://rstudio.github.io/DT/) pour les tableaux, le [tidyverse](https://www.tidyverse.org/) pour le travail sur les données.
+Bibliothèques : [plotly](https://plotly.com/r/) pour les graphiques, [crosstalk](https://rstudio.github.io/crosstalk/) pour le lien entre la carte et le graphique « évolution annuelle », [bslib](https://rstudio.github.io/bslib/) pour le thème Bootstrap 5, le [tidyverse](https://www.tidyverse.org/) pour le travail sur les données.
 
 Seules deux choses sont chargées depuis internet à l'ouverture de la page : la police *Poppins* (Google Fonts) et les contours de la carte du monde (CDN plotly). Sans internet la page fonctionne quand même, avec la police par défaut et sans fond de carte. Pour une page entièrement hors ligne, hébergez vous-même les fichiers topojson et renseignez `params$topojson_url`.
 
@@ -456,17 +450,15 @@ rmarkdown::render("Dashboard_Hackathon_2026.Rmd",
                   params = list(year = 2023, neighbours = c("BE", "FR", "DE")))
 ```
 
-**Un autre pays.** Télécharger la même sélection Comext pour ce déclarant, lancer `script.R` pour obtenir son `final_df.rds`, renseigner `reporter`, `reporter_code_twins` et `neighbours`, et knitter. Le code ne suppose jamais le Luxembourg autrement que par ces paramètres. Pour les Trade twins, `eu27_df.rds` doit contenir les *autres* pays : retirez-en le nouveau pays et ajoutez le Luxembourg si vous le voulez parmi les twins.
+**Un autre pays.** Lancer `final_df.R` avec ce déclarant pour obtenir son `final_df.rds`, renseigner `reporter`, `reporter_code_twins` et `neighbours`, et knitter. Le code ne suppose jamais le Luxembourg autrement que par ces paramètres. Pour les Trade twins, `eu27_df.rds` doit contenir les *autres* pays : retirez-en le nouveau pays et ajoutez le Luxembourg si vous le voulez parmi les twins.
 
-**Une année plus récente.** Retélécharger la dernière période (section 4.2), relancer `script.R`, régler `year`, knitter. Pour le zoom, télécharger aussi le fichier à 4 chiffres de la nouvelle année et renseigner `hs4_path`.
+**Une année plus récente.** Relancer `final_df.R` et `eu27_df.R` (ou `Create_database_and_HTML_output.R`, qui lance les deux) pour rafraîchir les fichiers de données, régler `year`, knitter. Pour le zoom, télécharger aussi le fichier à 4 chiffres de la nouvelle année et renseigner `hs4_path`.
 
 ---
 
 ## 8. Limites connues
 
-* La dernière année des données est partielle tant qu'Eurostat n'a pas publié décembre.
 * HS2 est le niveau de produit de toutes les vues. Le seul détail plus fin est le zoom du top 5 de la vue Summary (4 chiffres, une année). Le jeu Comext contient aussi HS6 et CN8.
-* Le HTML pèse environ 22 Mo parce que toutes les combinaisons y sont stockées. Il s'ouvre en une seconde depuis le disque ; pour l'envoyer par e-mail, un zip peut être nécessaire.
 * Les données mensuelles (saisonnalité) ne sont pas traitées.
 * Les chiffres sont ceux déclarés par le Luxembourg. Le même flux déclaré par le pays partenaire peut différer un peu (coûts de transport, calendrier, marchandises passant par un pays tiers).
 
@@ -478,7 +470,7 @@ rmarkdown::render("Dashboard_Hackathon_2026.Rmd",
 
 Quentin Barthel · Quentin Schmidt · Kevin Alati · Sandrine Herbeth · Mathieu Scheffer
 
-Questions et suggestions : ouvrir une *issue* sur ce dépôt.
+Pour toute question ou suggestion : ouvrir une *issue* sur ce dépôt.
 
 ---
 
