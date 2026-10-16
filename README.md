@@ -64,7 +64,7 @@ rmarkdown::render("Dashboard_Hackathon_2026.Rmd", params = list(year = 2019),
 
 The result is **one HTML file (about 22 MB)** next to the `.Rmd`. Open it in any modern browser (Chrome, Edge, Firefox). Knitting takes 1–2 minutes.
 
-**No R installed?** Open `trade_cockpit_LU_V13.html`: it is the knitted page, ready to use.
+**No R installed?** Open `Dashboard_Hackathon_2026.html`: it is the knitted page, ready to use.
 
 ---
 
@@ -80,7 +80,7 @@ Hackathon-2026-Trade/
 │
 │   The page
 ├── Dashboard_Hackathon_2026.Rmd         ALL the code: data preparation, charts, page layout, interactivity (current version)
-├── trade_cockpit_LU_V13.html        the knitted page, ready to open
+├── Dashboard_Hackathon_2026.html        the knitted page, ready to open
 ├── trade_cockpit_LU_V12.Rmd         previous version (same page without the 4-digit drill-down), kept for reference
 ├── trade_cockpit_LU_V12.html        its knitted page
 │
@@ -314,7 +314,7 @@ rmarkdown::render("Dashboard_Hackathon_2026.Rmd", params = list(year = 2019),
 
 Le résultat est **un fichier HTML (environ 22 Mo)** à côté du `.Rmd`. Il s'ouvre dans n'importe quel navigateur récent (Chrome, Edge, Firefox). Le knit prend 1 à 2 minutes.
 
-**Pas de R installé ?** Ouvrir `trade_cockpit_LU_V13.html` : c'est la page déjà produite, prête à l'emploi.
+**Pas de R installé ?** Ouvrir `Dashboard_Hackathon_2026.html` : c'est la page déjà produite, prête à l'emploi.
 
 ---
 
@@ -330,7 +330,7 @@ Hackathon-2026-Trade/
 │
 │   La page
 ├── Dashboard_Hackathon_2026.Rmd         TOUT le code : préparation des données, graphiques, mise en page, interactivité (version actuelle)
-├── trade_cockpit_LU_V13.html        la page produite, prête à ouvrir
+├── Dashboard_Hackathon_2026.html        la page produite, prête à ouvrir
 ├── trade_cockpit_LU_V12.Rmd         version précédente (même page sans le zoom à 4 chiffres), gardée pour mémoire
 ├── trade_cockpit_LU_V12.html        sa page produite
 │
