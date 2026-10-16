@@ -73,30 +73,21 @@ All files are at the root of the repository, next to each other, so that the `.R
 ```text
 Hackathon-2026-Trade/
 ├── README.md                        this file (EN + FR)
-├── LICENSE                          EUPL-1.2
 ├── Trade_Hackathon_2026.Rproj       RStudio project: open it first
 │
 │   The page
 ├── Dashboard_Hackathon_2026.Rmd         ALL the code: data preparation, charts, page layout, interactivity (current version)
 ├── Dashboard_Hackathon_2026.html        the knitted page, ready to open
-├── Dashboard_Hackathon_LU_V12.Rmd         previous version (same page without the 4-digit drill-down), kept for reference
-├── Dashboard_Hackathon_LU_V12.html        its knitted page
 │
-│   The data (section 4)
-├── final_df.rds                     Luxembourg × all partner countries, 1999–2025 (required)
-├── eu27_df.rds                      the other 26 EU countries × World (Trade twins view; optional)
-├── code_agg.xlsx                    Eurostat list of partner aggregates = the "Regions" (optional)
-├── 2025_4digits.json                4-digit product detail for 2025 (Summary drill-down; optional)
-├── 2_digits_1999-2004_LU.xlsx       raw Eurostat downloads from which final_df.rds is built
-├── 2_digits_2005-2014_LU.xlsx
-├── 2_digits_2015-2025_LU.xlsx
+│   The data
+├── final_df.rds                     Luxembourg × all partner countries, 1999–2025
+├── eu27_df.rds                      the other 26 EU countries × World (Trade twins view)
+├── code_agg.xlsx                    Eurostat list of partner aggregates = the "Regions"
+├── 2025_4digits.json                4-digit product detail for 2025 (Summary drill-down)
 │
-│   Helper scripts
-├── script.R                         builds final_df.rds from the three Excel downloads
-├── geo_aggregates.R                 reads Eurostat's GEO list and splits each aggregate into its countries
-│
-└── docs/
-    └── screenshots/                 images used in this README
+│   Scripts
+├── Create_database_and_HTML_output.R                         calls eu27_df.R and final_df.R to build the R Markdown and the databases.
+
 ```
 
 `.Rproj.user`, `.RDataTmp` and `.Rhistory` are RStudio working files; they can be ignored.
