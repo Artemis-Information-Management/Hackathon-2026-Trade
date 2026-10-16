@@ -4,7 +4,7 @@
 
 **Starting point.** The challenge asks what Luxembourg trades, with whom, how it changes and how Luxembourg compares with other countries. Our goal: one tool that answers those questions for someone who is not a trade statistician.
 
-**1. Which data?** Eurostat Comext (ds-045409). We started from Excel downloads; The first challenge was to decide how to deal with that amount of data. We decided to run processes separately, an extraction using R, another one with Python.  At the beginning though, we chose to download the first part of the data manually, so that we could start working on it directly. However, since we wanted to improve the downloading process, we worked in parallel to extract the data using API instead of doing manually. 
+**1. Which data?** Eurostat Comext (ds-045409). We started from Excel downloads; The first challenge was to decide how to deal with that amount of data. We decided to run processes separately, an extraction using R, another one with Python.  At the beginning though, we chose to download the first part of the data manually, so that we could start working on it directly. However, since we wanted to improve the downloading process, we worked in parallel to extract the data using API instead of doing it manually. 
 
 **2. How deep?** We mainly used 2 digits, and 4-digits for the drill-down graph from the summary . So: 97 HS2 chapters in every view, 4 digits only where it matters (the year's top 5).
 
