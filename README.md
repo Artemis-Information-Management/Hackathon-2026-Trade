@@ -1,4 +1,4 @@
-# Trade Cockpit · Luxembourg
+# Trade Hackathon 2026 · Luxembourg
 
 **Interactive dashboard of Luxembourg's external trade in goods** — who Luxembourg trades with, what it buys and sells, how this changes over time, and which EU countries have a similar trade profile.
 
