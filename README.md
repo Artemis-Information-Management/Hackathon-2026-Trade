@@ -104,6 +104,7 @@ Products are **HS2 chapters** and **HS4 chapters**: the goods are grouped into 9
 
 ### 4.1 `final_df.rds` — required
 
+| | |
 |---|---|
 | Content | reporter = **Luxembourg (LU)** · partner = **all** partner countries and the *World* aggregate · product = `TOTAL` + the 97 HS2 chapters · flow = 1 (import) and 2 (export) · annual, **1999 → 2025** |
 | Size | 262 231 rows, 257 partner codes |
@@ -114,6 +115,7 @@ It is built by `final_df.R` (run by `Create_database_and_HTML_output.R`). The `.
 
 ### 4.2 `eu27_df.rds` — for the Trade twins view
 
+| | |
 |---|---|
 | Content | reporter = **each of the other 26 EU countries** · partner = `WORLD` only · product = `TOTAL` + HS2 chapters · both flows · annual, 1999 → 2025 |
 | Size | 136 775 rows |
