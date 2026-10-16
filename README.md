@@ -8,8 +8,6 @@ One R Markdown file produces one self-contained HTML page. No server, no databas
 
 🇫🇷 *Version française plus bas : [Lire en français](#trade-cockpit--luxembourg-fr)*
 
-![Trade twins tab](docs/screenshots/trade_twins.png)
-
 ---
 
 ## Contents
