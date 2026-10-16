@@ -105,7 +105,6 @@ Products are **HS2 chapters** and **HS4 chapters**: the goods are grouped into 9
 ### 4.1 `final_df.rds` — required
 
 | | |
-|---|---|
 | Content | reporter = **Luxembourg (LU)** · partner = **all** partner countries and the *World* aggregate · product = `TOTAL` + the 97 HS2 chapters · flow = 1 (import) and 2 (export) · annual, **1999 → 2025** |
 | Size | 262 231 rows, 257 partner codes |
 | Columns used by the page | `PRODUCT_CODE`, `PRODUCT_LABEL`, `FLOW_LABEL` (IMPORT / EXPORT), `PARTNER_CODE`, `PARTNER_LABEL`, `TIME` (year), `VALUE_IN_EUROS` |
