@@ -57,7 +57,7 @@ Or from the R console, from the repository folder:
 ```r
 rmarkdown::render("Dashboard_Hackathon_2026.Rmd")                                  # year 2025 (default)
 rmarkdown::render("Dashboard_Hackathon_2026.Rmd", params = list(year = 2019),
-                  output_file = "trade_cockpit_LU_2019.html")
+                  output_file = "Dashboard_Hackathon_LU_2019.html")
 ```
 
 The result is **one HTML file (about 22 MB)** next to the `.Rmd`. Open it in any modern browser (Chrome, Edge, Firefox). Knitting takes 1–2 minutes.
@@ -79,8 +79,8 @@ Hackathon-2026-Trade/
 │   The page
 ├── Dashboard_Hackathon_2026.Rmd         ALL the code: data preparation, charts, page layout, interactivity (current version)
 ├── Dashboard_Hackathon_2026.html        the knitted page, ready to open
-├── trade_cockpit_LU_V12.Rmd         previous version (same page without the 4-digit drill-down), kept for reference
-├── trade_cockpit_LU_V12.html        its knitted page
+├── Dashboard_Hackathon_LU_V12.Rmd         previous version (same page without the 4-digit drill-down), kept for reference
+├── Dashboard_Hackathon_LU_V12.html        its knitted page
 │
 │   The data (section 4)
 ├── final_df.rds                     Luxembourg × all partner countries, 1999–2025 (required)
@@ -307,7 +307,7 @@ Ou depuis la console R, dans le dossier du dépôt :
 ```r
 rmarkdown::render("Dashboard_Hackathon_2026.Rmd")                                  # année 2025 (par défaut)
 rmarkdown::render("Dashboard_Hackathon_2026.Rmd", params = list(year = 2019),
-                  output_file = "trade_cockpit_LU_2019.html")
+                  output_file = "Dashboard_Hackathon_LU_2019.html")
 ```
 
 Le résultat est **un fichier HTML (environ 22 Mo)** à côté du `.Rmd`. Il s'ouvre dans n'importe quel navigateur récent (Chrome, Edge, Firefox). Le knit prend 1 à 2 minutes.
@@ -329,8 +329,8 @@ Hackathon-2026-Trade/
 │   La page
 ├── Dashboard_Hackathon_2026.Rmd         TOUT le code : préparation des données, graphiques, mise en page, interactivité (version actuelle)
 ├── Dashboard_Hackathon_2026.html        la page produite, prête à ouvrir
-├── trade_cockpit_LU_V12.Rmd         version précédente (même page sans le zoom à 4 chiffres), gardée pour mémoire
-├── trade_cockpit_LU_V12.html        sa page produite
+├── Dashboard_Hackathon_LU_V12.Rmd         version précédente (même page sans le zoom à 4 chiffres), gardée pour mémoire
+├── Dashboard_Hackathon_LU_V12.html        sa page produite
 │
 │   Les données (section 4)
 ├── final_df.rds                     Luxembourg × tous les pays partenaires, 1999–2025 (obligatoire)
