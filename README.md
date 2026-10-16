@@ -72,21 +72,21 @@ All files are at the root of the repository, next to each other, so that the `.R
 
 ```text
 Hackathon-2026-Trade/
-├── README.md                           this file (EN + FR)
+├── README.md                           This file (EN + FR)
 ├── Trade_Hackathon_2026.Rproj          RStudio project: open it first
 │
 │   The page
 ├── Dashboard_Hackathon_2026.Rmd        ALL the code: data preparation, charts, page layout, interactivity (current version)
-├── Dashboard_Hackathon_2026.html       the knitted page, ready to open
+├── Dashboard_Hackathon_2026.html       The knitted page, ready to open
 │
 │   The data
 ├── final_df.rds                        Luxembourg × all partner countries, 1999–2025
-├── eu27_df.rds                         the other 26 EU countries × World (Trade twins view)
+├── eu27_df.rds                         The other 26 EU countries × World (Trade twins view)
 ├── code_agg.xlsx                       Eurostat list of partner aggregates = the "Regions"
 ├── 2025_4digits.json                   4-digit product detail for 2025 (Summary drill-down)
 │
 │   Scripts
-├── Create_database_and_HTML_output.R   calls eu27_df.R and final_df.R to build the R Markdown and the databases.
+├── Create_database_and_HTML_output.R   Calls eu27_df.R and final_df.R to build the R Markdown and the databases.
 
 ```
 
@@ -109,7 +109,7 @@ Products are **HS2 chapters** and **HS4 chapters**: the goods are grouped into 9
 | Content | reporter = **Luxembourg (LU)** · partner = **all** partner countries and the *World* aggregate · product = `TOTAL` + the 97 HS2 chapters · flow = 1 (import) and 2 (export) · annual, **1999 → 2025** |
 | Size | 262 231 rows, 257 partner codes |
 | Columns used by the page | `PRODUCT_CODE`, `PRODUCT_LABEL`, `FLOW_LABEL` (IMPORT / EXPORT), `PARTNER_CODE`, `PARTNER_LABEL`, `TIME` (year), `VALUE_IN_EUROS` |
-| Other columns (ignored) | `FLOW_CODE`, `INDICATOR_CODE` |
+| Other columns | `FLOW_CODE`, `INDICATOR_CODE` |
 
 It is built by `final_df.R` (run by `Create_database_and_HTML_output.R`). The `.Rmd` reads it with `readRDS()`; if a `final_df` table is already in memory (for instance right after running `final_df.R`), it uses that one instead.
 
@@ -314,21 +314,21 @@ Tous les fichiers sont à la racine du dépôt, les uns à côté des autres, po
 
 ```text
 Hackathon-2026-Trade/
-├── README.md                            ce fichier (EN + FR)
-├── Trade_Hackathon_2026.Rproj           projet RStudio : à ouvrir en premier
+├── README.md                            Ce fichier (EN + FR)
+├── Trade_Hackathon_2026.Rproj           Projet RStudio : à ouvrir en premier
 │
 │   La page
 ├── Dashboard_Hackathon_2026.Rmd         TOUT le code : préparation des données, graphiques, mise en page, interactivité (version actuelle)
-├── Dashboard_Hackathon_2026.html        la page produite, prête à ouvrir
+├── Dashboard_Hackathon_2026.html        La page produite, prête à ouvrir
 │
 │   Les données
 ├── final_df.rds                         Luxembourg × tous les pays partenaires, 1999–2025
-├── eu27_df.rds                          les 26 autres pays de l'UE × Monde (vue Trade twins)
-├── code_agg.xlsx                        liste Eurostat des agrégats de partenaires = les « Regions »
-├── 2025_4digits.json                    détail produit à 4 chiffres pour 2025 (zoom de la vue Summary)
+├── eu27_df.rds                          Les 26 autres pays de l'UE × Monde (vue Trade twins)
+├── code_agg.xlsx                        Liste Eurostat des agrégats de partenaires = les « Regions »
+├── 2025_4digits.json                    Détail produit à 4 chiffres pour 2025 (zoom de la vue Summary)
 │
 │   Scripts
-├── Create_database_and_HTML_output.R    appelle eu27_df.R et final_df.R pour construire les bases de données et le R Markdown.
+├── Create_database_and_HTML_output.R    Appelle eu27_df.R et final_df.R pour construire les bases de données et le R Markdown.
 
 ```
 
@@ -346,16 +346,18 @@ Les produits sont des **chapitres HS2** et **chapitres HS4** : les marchandises 
 
 ### 4.1 `final_df.rds` — obligatoire
 
+| | |
 |---|---|
 | Contenu | déclarant (reporter) = **Luxembourg (LU)** · partenaire = **tous** les pays partenaires et l'agrégat *World* · produit = `TOTAL` + les 97 chapitres HS2 · flux = 1 (import) et 2 (export) · annuel, **1999 → 2025** |
 | Taille | 262 231 lignes, 257 codes partenaires |
 | Colonnes utilisées par la page | `PRODUCT_CODE`, `PRODUCT_LABEL`, `FLOW_LABEL` (IMPORT / EXPORT), `PARTNER_CODE`, `PARTNER_LABEL`, `TIME` (année), `VALUE_IN_EUROS` |
-| Autres colonnes (ignorées) | `FLOW_CODE`, `INDICATOR_CODE` |
+| Autres colonnes | `FLOW_CODE`, `INDICATOR_CODE` |
 
 Il est construit par `final_df.R` (lancé par `Create_database_and_HTML_output.R`). Le `.Rmd` le lit avec `readRDS()` ; si une table `final_df` est déjà en mémoire (par exemple juste après avoir lancé `final_df.R`), il utilise celle-là.
 
 ### 4.2 `eu27_df.rds` — pour la vue Trade twins
 
+| | |
 |---|---|
 | Contenu | déclarant = **chacun des 26 autres pays de l'UE** · partenaire = `WORLD` seulement · produit = `TOTAL` + chapitres HS2 · les deux flux · annuel, 1999 → 2025 |
 | Taille | 136 775 lignes |
