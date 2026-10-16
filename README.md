@@ -102,9 +102,10 @@ All data come from **Eurostat Comext**, dataset **[ds-045409] EU trade since 198
 
 Products are **HS2 chapters** and **HS4 chapters**: the goods are grouped into 97 families following the international customs classification (Harmonized System, 2-digit level): 87 = vehicles, 84 = machinery, 30 = pharmaceuticals, 27 = mineral fuels, and so on. `TOTAL` = all products.
 
-### 4.1 `final_df.rds` — required
+### 4.1 `final_df.rds`
 
 | | |
+|---|---|
 | Content | reporter = **Luxembourg (LU)** · partner = **all** partner countries and the *World* aggregate · product = `TOTAL` + the 97 HS2 chapters · flow = 1 (import) and 2 (export) · annual, **1999 → 2025** |
 | Size | 262 231 rows, 257 partner codes |
 | Columns used by the page | `PRODUCT_CODE`, `PRODUCT_LABEL`, `FLOW_LABEL` (IMPORT / EXPORT), `PARTNER_CODE`, `PARTNER_LABEL`, `TIME` (year), `VALUE_IN_EUROS` |
