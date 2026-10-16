@@ -4,11 +4,11 @@
 
 **Starting point.** The challenge asks what Luxembourg trades, with whom, how it changes and how Luxembourg compares with other countries. Our goal: one tool that answers those questions for someone who is not a trade statistician.
 
-**1. Which data?** Eurostat Comext (ds-045409). We started from Excel downloads; The first challenge was to decide how to deal with that amount of data. We decided to run processes separately, an extraction using R, another one with Python.
+**1. Which data?** Eurostat Comext (ds-045409). We started from Excel downloads; The first challenge was to decide how to deal with that amount of data. We decided to run processes separately, an extraction using R, another one with Python.  At the beginning though, we chose to download the first part of the data manually, so that we could start working on it directly. However, since we wanted to improve the downloading process, we worked in parallel to extract the data using API instead of doing manually. 
 
 **2. How deep?** We mainly used 2 digits, and 4-digits for the drill-down graph from the summary . So: 97 HS2 chapters in every view, 4 digits only where it matters (the year's top 5).
 
-**3. What form?** One self-contained HTML file, no server: using R Markdown only to produce an offline functional dashboard.
+**3. What form?** One self-contained HTML file, serverless: using R Markdown only to produce an offline functional dashboard.
 
 **4. What to show first?** The Summary follows the challenge questions in order: the year in figures, the top 5 products (click to zoom), the four neighbours, the trade balance, then product dependence. The other views go deeper: Overview (partners on a map), Product (how many partners a product relies on), Country (one partner or region), Trade twins.
 
@@ -26,7 +26,7 @@
 
 **Point de départ.** Le défi demande ce que le Luxembourg échange, avec qui, comment cela évolue et comment le Luxembourg se compare aux autres pays. Notre objectif : un outil qui répond à ces questions pour quelqu'un qui n'est pas statisticien du commerce.
 
-**1. Quelles données ?** Eurostat Comext (ds-045409). Nous sommes partis de téléchargements Excel ; le premier défi a été de décider comment traiter ce volume de données. Nous avons choisi de séparer les traitements : une extraction avec R, une autre avec Python.
+**1. Quelles données ?** Eurostat Comext (ds-045409). Nous sommes partis de téléchargements Excel ; le premier défi a été de décider comment traiter ce volume de données. Nous avons choisi de séparer les traitements : une extraction avec R, une autre avec Python. Au départ, nous avons choisi de télécharger manuellement la première partie des données, pour pouvoir commencer à travailler dessus tout de suite. Mais comme nous voulions améliorer le processus de téléchargement, nous avons travaillé en parallèle sur une extraction des données par l’API, à la place du téléchargement manuel.
 
 **2. Quelle profondeur ?** Nous avons surtout utilisé le niveau 2 chiffres, et le niveau 4 chiffres pour le graphique de zoom du Summary. Donc : les 97 chapitres HS2 dans toutes les vues, le niveau 4 chiffres seulement là où ça compte (le top 5 de l'année).
 
