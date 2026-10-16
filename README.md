@@ -72,21 +72,21 @@ All files are at the root of the repository, next to each other, so that the `.R
 
 ```text
 Hackathon-2026-Trade/
-├── README.md                        this file (EN + FR)
-├── Trade_Hackathon_2026.Rproj       RStudio project: open it first
+├── README.md                           this file (EN + FR)
+├── Trade_Hackathon_2026.Rproj          RStudio project: open it first
 │
 │   The page
-├── Dashboard_Hackathon_2026.Rmd         ALL the code: data preparation, charts, page layout, interactivity (current version)
-├── Dashboard_Hackathon_2026.html        the knitted page, ready to open
+├── Dashboard_Hackathon_2026.Rmd        ALL the code: data preparation, charts, page layout, interactivity (current version)
+├── Dashboard_Hackathon_2026.html       the knitted page, ready to open
 │
 │   The data
-├── final_df.rds                     Luxembourg × all partner countries, 1999–2025
-├── eu27_df.rds                      the other 26 EU countries × World (Trade twins view)
-├── code_agg.xlsx                    Eurostat list of partner aggregates = the "Regions"
-├── 2025_4digits.json                4-digit product detail for 2025 (Summary drill-down)
+├── final_df.rds                        Luxembourg × all partner countries, 1999–2025
+├── eu27_df.rds                         the other 26 EU countries × World (Trade twins view)
+├── code_agg.xlsx                       Eurostat list of partner aggregates = the "Regions"
+├── 2025_4digits.json                   4-digit product detail for 2025 (Summary drill-down)
 │
 │   Scripts
-├── Create_database_and_HTML_output.R                         calls eu27_df.R and final_df.R to build the R Markdown and the databases.
+├── Create_database_and_HTML_output.R   calls eu27_df.R and final_df.R to build the R Markdown and the databases.
 
 ```
 
